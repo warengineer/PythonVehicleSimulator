@@ -461,3 +461,16 @@ def satlim(x, x_min, x_max):
     if np.isscalar(x) and np.isscalar(x_min) and np.isscalar(x_max):
         return min(max(x, x_min), x_max)
     return np.minimum(np.maximum(x, x_min), x_max)
+
+#------------------------------------------------------------------------------
+
+def quat_step(q, w, h):
+    """Exact quaternion step q[k+1] = expm(Tquat(w) h) q[k] for a constant angular velocity w, as in SIMremus100.m.
+    Tquat(w)^2 = -(|w|/2)^2 I, so expm(A h) = cos(|w| h/2) I + sin(|w| h/2)/(|w|/2) A (no scipy needed)."""
+    A = Tquat(w)
+    a = 0.5 * np.linalg.norm(w)
+    if a * h < 1e-12:
+        E = np.eye(4) + h * A
+    else:
+        E = np.cos(a * h) * np.eye(4) + (np.sin(a * h) / a) * A
+    return E @ q
