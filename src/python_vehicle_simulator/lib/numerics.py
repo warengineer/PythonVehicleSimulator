@@ -295,3 +295,22 @@ def spline_nak(x, y, xi):
     b[-1] = 2 * (d[-2] / h[-2]**2 - d[-1] / h[-1]**2)
     s = np.linalg.solve(A, b)
     return _hermite_eval(x, y, s, xi)
+
+#------------------------------------------------------------------------------
+
+def interp1(x, y, xi, extrap=False):
+    """MATLAB interp1(x, y, xi, 'linear') (NaN outside [x1, xn]) or interp1(..., 'linear', 'extrap') (straight line
+    through the two end points). y may be a matrix whose first axis follows x."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    xi = np.atleast_1d(np.asarray(xi, float))
+    k = np.clip(np.searchsorted(x, xi, side="right") - 1, 0, len(x) - 2)
+    t = (xi - x[k]) / (x[k + 1] - x[k])
+    if y.ndim == 1:
+        out = y[k] + t * (y[k + 1] - y[k])
+    else:
+        t = t.reshape((-1,) + (1,) * (y.ndim - 1))
+        out = y[k] + t * (y[k + 1] - y[k])
+    if not extrap:
+        bad = (xi < x[0]) | (xi > x[-1])
+        out = np.where(bad.reshape((-1,) + (1,) * (out.ndim - 1)), np.nan, out)
+    return out

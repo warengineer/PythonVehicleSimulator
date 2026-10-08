@@ -533,6 +533,7 @@ def _otter_constants(mp, rp):
     n_max = math.sqrt((0.5 * 24.4 * g) / k_pos)
     n_min = -math.sqrt((0.5 * 13.6 * g) / k_neg)
     return dict(T=T, nabla=nabla, rg=rg_total, Ig=Ig, MRB=MRB, MA=MA, M=M, G=G, G_CF=G_CF, KB=KB, GM_T=GM_T,
+                w345=np.array([w3, w4, w5]),
                 GM_L=GM_L, Xu=Xu, Yv=Yv, Zw=Zw, Kp=Kp, Mq=Mq, Nr=Nr, n_min=n_min, n_max=n_max,
                 Cd=Hoerner(P["B_pont"], T), mp=mp, rp=rp)
 
@@ -546,10 +547,13 @@ def otter_thrust(n, n_min, n_max):
 
 #------------------------------------------------------------------------------
 
-def otter(x, n, mp=25.0, rp=(0.0, 0.0, 0.0), V_c=0.0, beta_c=0.0):
+def otter(x, n, mp=25.0, rp=(0.0, 0.0, 0.0), V_c=0.0, beta_c=0.0, munk=True):
     """The Otter USV of MSS otter.m written out line by line (without its checks of the lengths of x and n):
     x = [u v w p q r  x y z  phi theta psi], n = propeller speeds (rad/s), payload mp (kg) at rp (m),
-    current speed V_c (m/s) towards beta_c (rad). Returns xdot and U."""
+    current speed V_c (m/s) towards beta_c (rad). munk=False cancels the Munk moment (the lines that otter.m
+    offers as comments). Returns xdot, U and a dict par with the matrices (M, MRB, MA, C, CRB, CA, D, G, G_CF),
+    B_prop, n_min, n_max (the further outputs of otter.m), the hydrostatics, the thrusts, tau, the relative velocity
+    and the trim offset eta_0 of the payload."""
     P = OTTER
     c = _otter_constants(mp, rp)
     x = np.asarray(x, float)
@@ -563,6 +567,8 @@ def otter(x, n, mp=25.0, rp=(0.0, 0.0, 0.0), V_c=0.0, beta_c=0.0):
     H = Hmtrx(c["rg"])
     CRB = H.T @ np.block([[(m + mp) * Smtrx(nu2), O3], [O3, -Smtrx(c["Ig"] @ nu2)]]) @ H
     CA = m2c(c["MA"], nu_r)
+    if not munk:
+        CA[5, 0] = CA[5, 1] = CA[0, 5] = CA[1, 5] = 0.0
     Th = otter_thrust(n, c["n_min"], c["n_max"])
     y_pont = P["y_pont"]
     tau = np.array([Th[0] + Th[1], 0.0, 0.0, 0.0, 0.0, y_pont * Th[0] - y_pont * Th[1]])
@@ -576,7 +582,13 @@ def otter(x, n, mp=25.0, rp=(0.0, 0.0, 0.0), V_c=0.0, beta_c=0.0):
     e = eta - eta_0                                              # shifted equilibrium
     J = eulerang(e[3], e[4], e[5])[0]
     nudot = nu_c_dot + np.linalg.solve(c["M"], tau + tau_damp + tau_cf - (CRB + CA) @ nu_r - G @ e)
-    return np.r_[nudot, J @ nu], U
+    B_prop = P["k_pos"] * np.array([[1.0, 1.0], [y_pont, -y_pont]])
+    par = dict(M=c["M"], MRB=c["MRB"], MA=c["MA"], C=CRB + CA, CRB=CRB, CA=CA, G=G, G_CF=c["G_CF"], Ig=c["Ig"],
+               rg=c["rg"], T=c["T"], KB=c["KB"], GM_T=c["GM_T"], GM_L=c["GM_L"], w345=c["w345"],
+               D=-np.diag([c["Xu"], c["Yv"], c["Zw"], c["Kp"], c["Mq"], c["Nr"]]), B_prop=B_prop,
+               n_min=c["n_min"], n_max=c["n_max"], thrust=Th, tau=tau, eta_0=eta_0, nu_r=nu_r, nu_c=nu_c,
+               nu_c_dot=nu_c_dot, Cd=c["Cd"])
+    return np.r_[nudot, J @ nu], U, par
 
 #------------------------------------------------------------------------------
 
