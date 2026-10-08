@@ -137,3 +137,16 @@ def cylinderDrag(L, B, nu_r, re_length=None):
     tab = KAPPA_SUB if Re < 2e5 else KAPPA_SUP
     kappa = float(np.interp(L / B, tab[:, 0], tab[:, 1]))
     return Cd * kappa
+
+#------------------------------------------------------------------------------
+
+def coeffLiftDrag(b, S, CD_0, alpha, sigma=0.0, e=0.3):
+    """Lift and drag coefficients of a submerged "wing" (MSS coeffLiftDrag.m, Beard and McLain 2012):
+    AR = b^2/S, CL_alpha = pi AR / (1 + sqrt(1 + (AR/2)^2)), CL = (1 - sigma) CL_alpha alpha
+    + sigma 2 sign(alpha) sin^2(alpha) cos(alpha), CD = CD_0 + CL^2 / (pi e AR), Oswald number e = 0.3."""
+    AR = b**2 / S
+    CL_alpha = np.pi * AR / (1 + np.sqrt(1 + (AR / 2) ** 2))
+    alpha = np.asarray(alpha, float)
+    CL = (1 - sigma) * CL_alpha * alpha + sigma * 2 * np.sign(alpha) * np.sin(alpha) ** 2 * np.cos(alpha)
+    CD = CD_0 + CL**2 / (np.pi * e * AR)
+    return CL, CD
