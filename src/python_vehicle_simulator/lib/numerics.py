@@ -216,3 +216,21 @@ def expm_taylor(A):
         E = E + term
         k += 1
     return E
+
+#------------------------------------------------------------------------------
+
+def obsv(A, H):
+    """Observability matrix [H; H A; ...; H A^(n-1)]."""
+    A = np.atleast_2d(A)
+    H = np.atleast_2d(H)
+    return np.vstack([H @ np.linalg.matrix_power(A, i) for i in range(A.shape[0])])
+
+#------------------------------------------------------------------------------
+
+def freqresp(A, B, C, D, w):
+    """Frequency response C (j w I - A)^-1 B + D of a SISO state-space model at the frequencies w [rad/s]."""
+    A = np.atleast_2d(np.asarray(A, float))
+    n = A.shape[0]
+    B = np.asarray(B, float).reshape(n)
+    C = np.asarray(C, float).reshape(n)
+    return np.array([C @ np.linalg.solve(1j * wk * np.eye(n) - A, B) + D for wk in np.atleast_1d(w)])
