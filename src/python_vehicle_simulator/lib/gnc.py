@@ -167,13 +167,14 @@ def m2c(M, nu):
         C[3:6,0:3] = -Smtrx(dt_dnu1)
         C[3:6,3:6] = -Smtrx(dt_dnu2)
             
-    else:   # 3-DOF model (surge, sway and yaw)
-        #C = [ 0             0            -M(2,2)*nu(2)-M(2,3)*nu(3)
-        #      0             0             M(1,1)*nu(1)
-        #      M(2,2)*nu(2)+M(2,3)*nu(3)  -M(1,1)*nu(1)          0  ]    
-        C = np.zeros( (3,3) ) 
-        C[0,2] = -M[1,1] * nu[1] - M[1,2] * nu[2]
-        C[1,2] =  M[0,0] * nu[0] 
+    else:   # 3-DOF model (surge, sway and yaw), full momenta p = M nu as in MSS m2c.m (2026-10-07)
+        #C = [ 0     0    -p(2)
+        #      0     0     p(1)
+        #      p(2) -p(1)  0    ]
+        p = np.matmul(M, nu)
+        C = np.zeros( (3,3) )
+        C[0,2] = -p[1]
+        C[1,2] =  p[0]
         C[2,0] = -C[0,2]       
         C[2,1] = -C[1,2]
         
