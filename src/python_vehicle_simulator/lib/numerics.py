@@ -314,3 +314,29 @@ def interp1(x, y, xi, extrap=False):
         bad = (xi < x[0]) | (xi > x[-1])
         out = np.where(bad.reshape((-1,) + (1,) * (out.ndim - 1)), np.nan, out)
     return out
+
+#------------------------------------------------------------------------------
+
+def levenberg_marquardt(res, jac, p0, valid=lambda p: True, tol=1e-14, max_iter=500):
+    """Minimize sum(res(p)^2) with the Levenberg-Marquardt method (numpy only). res(p) -> residual vector,
+    jac(p) -> Jacobian, valid(p) -> False rejects a step (e.g. a negative time constant).
+    Returns the parameters and the RMS residual."""
+    p, lam = np.array(p0, float), 1e-3
+    e = res(p)
+    for _ in range(max_iter):
+        J = jac(p)
+        g, Hm = J.T @ e, J.T @ J
+        dp = -np.linalg.solve(Hm + lam * np.diag(np.diag(Hm)), g)
+        if not valid(p + dp):
+            lam *= 10
+            continue
+        e_new = res(p + dp)
+        if np.all(np.isfinite(e_new)) and e_new @ e_new < e @ e:
+            p, e, lam = p + dp, e_new, lam * 0.3
+            if np.linalg.norm(dp) < tol * (1 + np.linalg.norm(p)):
+                break
+        else:
+            lam *= 10
+            if lam > 1e16:                                   # no further decrease possible: converged
+                break
+    return p, np.sqrt(np.mean(e**2))

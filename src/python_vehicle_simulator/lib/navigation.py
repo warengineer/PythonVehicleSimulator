@@ -95,3 +95,44 @@ def sawToothWave(t):
     dec = ~inc
     y[dec] = -((tn[dec] - width * 2 * np.pi) / ((1 - width) * 2 * np.pi)) * 2 + 1
     return y
+
+#------------------------------------------------------------------------------
+
+class EKF_5states:
+    """MSS EKF_5states.m (NED frame) as a class instead of persistent variables (Fossen and Fossen 2021):
+        x[k+1] = x[k] + h U cos(chi),  y[k+1] = y[k] + h U sin(chi),  U[k+1] = U[k] + h(-alpha1 U + w1),
+        chi[k+1] = chi[k] + h omega,   omega[k+1] = omega[k] + h(-alpha2 omega + w2);   y1 = x + v1,  y2 = y + v2.
+    step(x_meas, y_meas) is called every h seconds; the positions are used every Z-th call (GNSS Z times slower).
+    It returns x_hat[k] = [x, y, U, chi, omega], the estimate at the present sample after the correction (equal to
+    the prediction from the previous call when no position arrives), as the code of EKF_5states.m does; the help
+    text of EKF_5states.m calls the output the predicted state x_hat[k+1]. The prediction is kept in self.x_prd."""
+
+    def __init__(self, h, Z, Qd, Rd, alpha1=0.01, alpha2=0.1, x_prd_init=None, x0=(0.0, 0.0)):
+        self.h, self.Z, self.Qd, self.Rd, self.a1, self.a2 = h, Z, np.asarray(Qd, float), np.asarray(Rd, float), \
+            alpha1, alpha2
+        self.x_prd = np.array([x0[0], x0[1], 0.0, 0.0, 0.0]) if x_prd_init is None else np.asarray(x_prd_init, float)
+        self.P_prd = np.eye(5)
+        self.count = 1
+
+    def step(self, p1, p2):
+        h, I5, P = self.h, np.eye(5), self.P_prd
+        Cd = np.array([[1.0, 0, 0, 0, 0], [0, 1.0, 0, 0, 0]])
+        Ed = h * np.array([[0, 0], [0, 0], [1.0, 0], [0, 0], [0, 1.0]])
+        if self.count == 1:                      # corrector: new GNSS position
+            K = P @ Cd.T @ np.linalg.inv(Cd @ P @ Cd.T + self.Rd)
+            IKC = I5 - K @ Cd
+            P_hat = IKC @ P @ IKC.T + K @ self.Rd @ K.T
+            x_hat = self.x_prd + K @ (np.array([p1, p2]) - Cd @ self.x_prd)
+            self.count = self.Z
+        else:                                    # no measurement: propagate
+            x_hat, P_hat = self.x_prd.copy(), P.copy()
+            self.count -= 1
+        U, chi, om = x_hat[2], x_hat[3], x_hat[4]
+        c, s = np.cos(chi), np.sin(chi)
+        f = np.array([U * c, U * s, -self.a1 * U, om, -self.a2 * om])
+        Ad = I5 + h * np.array([[0, 0, c, -U * s, 0], [0, 0, s, U * c, 0],
+                                [0, 0, -self.a1, 0, 0], [0, 0, 0, 0, 1],
+                                [0, 0, 0, 0, -self.a2]])
+        self.x_prd = x_hat + h * f               # predictor: sample k + 1
+        self.P_prd = Ad @ P_hat @ Ad.T + Ed @ self.Qd @ Ed.T
+        return x_hat

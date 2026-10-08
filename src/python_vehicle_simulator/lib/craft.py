@@ -38,17 +38,19 @@ def zeefakkel_KT(U):
 
 #------------------------------------------------------------------------------
 
-def zeefakkel(r, U, delta, delta_c, d_r=0.0):
+def zeefakkel(r, U, delta, delta_c, d_r=0.0, n3=None):
     """MSS zeefakkel.m (recreational craft, L = 45 m; Van Amerongen 1982): Norrbin model
     T r' + n3 r^3 + n1 r = K delta + d_r with n1 = 1, n3 = 0.4 and speed-dependent K, T; rudder
-    delta' = sat(sat(delta_c, 30 deg) - delta, 10 deg/s). Returns (psi_dot, r_dot, delta_dot)."""
+    delta' = sat(sat(delta_c, 30 deg) - delta, 10 deg/s). Returns (psi_dot, r_dot, delta_dot).
+    n3 replaces the cubic coefficient 0.4 (not in MSS)."""
     P = ZEEFAKKEL
     if U < P["U_range"][0] or U > P["U_range"][1]:
         raise ValueError("U should be between 1-7 m/s")
     K, T = zeefakkel_KT(U)
     delta_c = sat(delta_c, P["delta_max"])
     delta_dot = sat(delta_c - delta, P["Ddelta_max"])
-    r_dot = (1.0 / T) * (K * delta + d_r - P["n3"] * r**3 - P["n1"] * r)
+    n3 = P["n3"] if n3 is None else n3
+    r_dot = (1.0 / T) * (K * delta + d_r - n3 * r**3 - P["n1"] * r)
     return r, r_dot, delta_dot
 
 #------------------------------------------------------------------------------
@@ -984,3 +986,34 @@ def remus_propeller(n_rpm, U_r):
         X = P["rho"] * P["D"]**4 * P["KT_0"] * abs(n) * n
         K = P["rho"] * P["D"]**5 * P["KQ_0"] * abs(n) * n
     return X, K
+
+#------------------------------------------------------------------------------
+
+# Van Amerongen (1982): speed-dependent Nomoto gain K [1/s], time constant T [s] and cubic coefficient n3 [s^2]
+FRIGATE = dict(L=100.0, U_range=(5.0, 12.0), n1=1.0, delta_max=np.deg2rad(30), Ddelta_max=np.deg2rad(10),
+               T_delta=1.0, data=np.array([[6.0, 0.08, 20.0, 0.4], [9.0, 0.18, 27.0, 0.6], [12.0, 0.23, 21.0, 0.3]]))
+
+#------------------------------------------------------------------------------
+
+def frigate_KTn3(U):
+    """K, T, n3 of the frigate at the speed U (linear inter- and extrapolation, as frigate.m)."""
+    d = FRIGATE["data"]
+    return tuple(interp1_extrap(U, d[:, 0], d[:, i]) for i in (1, 2, 3))
+
+#------------------------------------------------------------------------------
+
+def frigate(r, U, delta, delta_c, d_r=0.0, n1=None, n3=None):
+    """MSS frigate.m: psi_dot = r, T r_dot + n3 r^3 + n1 r = K delta + d_r,
+    rudder: delta_dot = (delta_c - delta)/T_delta, |delta_c| <= 30 deg,
+    |delta_dot| <= 10 deg/s. Returns (psi_dot, r_dot, delta_dot). n1 and n3
+    may be overridden (n3 = 0: linear Nomoto model; not options of frigate.m)."""
+    P = FRIGATE
+    if U < P["U_range"][0] or U > P["U_range"][1]:
+        raise ValueError("U should be between 5-12 m/s")
+    K, T, n3_U = frigate_KTn3(U)
+    n3 = n3_U if n3 is None else n3
+    n1 = P["n1"] if n1 is None else n1
+    delta_c = sat(delta_c, P["delta_max"])
+    delta_dot = sat((delta_c - delta) / P["T_delta"], P["Ddelta_max"])
+    r_dot = (1.0 / T) * (K * delta + d_r - n3 * r**3 - n1 * r)
+    return r, r_dot, delta_dot

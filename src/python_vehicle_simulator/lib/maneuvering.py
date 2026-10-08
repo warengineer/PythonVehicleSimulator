@@ -74,3 +74,28 @@ def zigzag(ship, x, ui, t_final, t_rudderexecute, h, maneuver=(20.0, 20.0)):
         out[i] = np.r_[time, x[0:6], U, d_now]
         x = x + h * xdot
     return out
+
+#------------------------------------------------------------------------------
+
+def pullout(ship, x, ui, h, T=600.0):
+    """MSS pullout.m without the plot: rudder ui[0] for t < T, then zero; the same with -ui[0].
+    Returns t and the yaw rates r1, r2 in deg/s (Euler integration, as pullout.m)."""
+    N = int(mround(2 * T / h))
+    x0 = np.array(x, float)
+    out = []
+    for sgn in (1.0, -1.0):
+        x = x0.copy()
+        u_ship = np.array(ui, float) if np.ndim(ui) else float(ui)
+        rr = np.zeros(N + 1)
+        for i in range(N + 1):
+            time = i * h
+            d = sgn * (ui[0] if np.ndim(ui) else ui) if mround(time) < T else 0.0
+            if np.ndim(ui):
+                u_ship[0] = d
+            else:
+                u_ship = d
+            xdot, U = ship(x, u_ship)
+            rr[i] = x[2]
+            x = x + h * xdot
+        out.append(np.rad2deg(rr))
+    return np.arange(N + 1) * h, out[0], out[1]
