@@ -416,7 +416,7 @@ def euler2q(phi, theta, psi):
                   cy * cp * sr - sy * sp * cr,
                   sy * cp * sr + cy * sp * cr,
                   sy * cp * cr - cy * sp * sr])
-    return q / (q @ q)
+    return q / np.linalg.norm(q)
 
 #------------------------------------------------------------------------------
 

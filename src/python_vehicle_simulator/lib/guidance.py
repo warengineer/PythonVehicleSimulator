@@ -249,15 +249,15 @@ def crosstrackWpt(x2, y2, x1, y1, x, y):
 #------------------------------------------------------------------------------
 
 def crosstrackWpt3D(p2, p1, p):
-    """p_e = Ry' Rz' (p - p1) as written in MSS crosstrackWpt3D.m, including
-    its R_z, whose (2,1) element is -sin(pi_h) (ALOS3D.m uses +sin(pi_h));
-    check item 6 compares the two."""
+    """p_e = Ry' Rz' (p - p1), MSS crosstrackWpt3D.m: along-track, cross-track
+    and vertical-track errors of p from the line p1 -> p2 (the rotation of
+    ALOS3D.m; crosstrackWpt3D.m had -sin(pi_h) in R_z(2,1) until 2026-10-09)."""
     e = np.asarray(p2, float) - np.asarray(p1, float)
     pi_h = math.atan2(e[1], e[0])
     pi_v = math.atan2(-e[2], math.sqrt(e[0]**2 + e[1]**2))
     ch, sh = math.cos(pi_h), math.sin(pi_h)
     cv, sv = math.cos(pi_v), math.sin(pi_v)
-    R_z = np.array([[ch, -sh, 0.0], [-sh, ch, 0.0], [0.0, 0.0, 1.0]])
+    R_z = np.array([[ch, -sh, 0.0], [sh, ch, 0.0], [0.0, 0.0, 1.0]])
     R_y = np.array([[cv, 0.0, sv], [0.0, 1.0, 0.0], [-sv, 0.0, cv]])
     return R_y.T @ R_z.T @ (np.asarray(p, float) - np.asarray(p1, float))
 
