@@ -10,7 +10,7 @@ import numpy as np
 import math
 from python_vehicle_simulator.lib.gnc import crossFlowDrag, Hoerner
 
-RHO = 1026  # water density used internally by crossFlowDrag
+RHO = 1025  # water density used internally by crossFlowDrag (as in MSS)
 
 
 def test_pure_sway_force_matches_analytic_integral():

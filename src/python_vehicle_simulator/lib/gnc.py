@@ -202,33 +202,47 @@ def Hoerner(B,T):
 
 #------------------------------------------------------------------------------
 
-def crossFlowDrag(L,B,T,nu_r):
+def crossFlowDrag(L,B,T,nu_r,drag_model="Hoerner",n_strips=20,rho=1025.0,
+                  re_length=None):
     """
-    tau_crossflow = crossFlowDrag(L,B,T,nu_r) computes the cross-flow drag 
-    integrals for a marine craft using strip theory. 
+    tau_crossflow = crossFlowDrag(L,B,T,nu_r,drag_model) computes the
+    cross-flow drag integrals for a marine craft using strip theory
+    (MSS crossFlowDrag.m).
 
     M d/dt nu_r + C(nu_r)*nu_r + D*nu_r + g(eta) = tau + tau_crossflow
+
+    The strips are evaluated at their midpoints:
+        Y = -sum 1/2 rho T Cd |v_r + x r|(v_r + x r) dx,  N = -sum x (...),
+    and the heave force Z and pitch moment M the same with w_r + x q.
+    Returns tau_crossflow = [0, Y, Z, 0, M, N].
+
+    Inputs:
+        L, B, T:    length, beam and draft (m)
+        nu_r:       relative velocity [u-u_c, v-v_c, w-w_c, p, q, r]
+        drag_model: 'Hoerner' (2D coefficient of Hoerner's curve, default) or
+                    'cylinder' (cylinderDrag, for cylinder-shaped AUVs)
+        n_strips:   number of strips (20 in MSS)
+        rho:        density of water (1025 kg/m^3 in MSS)
+        re_length:  length in the Reynolds number of cylinderDrag instead of
+                    the diameter B (not in MSS; for comparisons)
     """
+    if drag_model == "Hoerner":
+        Cd_2D = Hoerner(B,T)    # 2D drag coefficient based on Hoerner's curve
+    elif drag_model == "cylinder":
+        from python_vehicle_simulator.lib.models import cylinderDrag
+        Cd_2D = cylinderDrag(L, B, nu_r, re_length)
+    else:
+        raise ValueError(f"unsupported drag model {drag_model}")
 
-    rho = 1026               # density of water
-    n = 20                   # number of strips
+    dx = L / n_strips
+    v_r, w_r, q, r = nu_r[1], nu_r[2], nu_r[4], nu_r[5]
+    xL = -L / 2 + (np.arange(1, n_strips + 1) - 0.5) * dx      # strip midpoints
+    U_h = np.abs(v_r + xL * r) * (v_r + xL * r)
+    U_v = np.abs(w_r + xL * q) * (w_r + xL * q)
+    k = 0.5 * rho * T * Cd_2D * dx
 
-    dx = L/n
-    Cd_2D = Hoerner(B,T)    # 2D drag coefficient based on Hoerner's curve
-
-    Yh = 0
-    Nh = 0
-    xL = -L/2 + dx/2
-    
-    for i in range(0,n):
-        v_r = nu_r[1]             # relative sway velocity
-        r = nu_r[5]               # yaw rate
-        Ucf = abs(v_r + xL * r) * (v_r + xL * r)
-        Yh = Yh - 0.5 * rho * T * Cd_2D * Ucf * dx         # sway force
-        Nh = Nh - 0.5 * rho * T * Cd_2D * xL * Ucf * dx    # yaw moment
-        xL += dx
-        
-    tau_crossflow = np.array([0, Yh, 0, 0, 0, Nh],float)
+    tau_crossflow = np.array([0.0, -k * U_h.sum(), -k * U_v.sum(), 0.0,
+                              -k * (xL * U_v).sum(), -k * (xL * U_h).sum()])
 
     return tau_crossflow
 
