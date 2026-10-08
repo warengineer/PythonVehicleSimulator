@@ -725,12 +725,8 @@ class OSVModel:
     """xdot = osv(x, ui, Vc, betaVc) of MSS (osv.m, version of the MSS master branch on 7 October 2026), 6 DOF,
     x = [u v w p q r  x y z  phi theta psi], ui = [n1, n2, n3, n4, alpha1, alpha2] (shaft speeds, azimuth angles in rad).
     eta_dot = J(eta) nu, nu_dot = nu_c_dot + M^-1 (tau_thr + tau_crossflow - (CRB + CA + D) nu_r - G eta) with
-    CA = m2c(MA, nu) and D11 = exp(-3|u_r|) D11_lin - Xuu |u_r| (XuuITTC). osv.m keeps its data in a persistent
-    structure and sets vessel.D(1,1) = 0 at the end of its first call, so from the second call on the linear surge
-    damping is gone; SIMosv.m calls osv() twice before its loop. calls_before = number of earlier calls."""
-
-    def __init__(self, calls_before=2):
-        self.calls = calls_before
+    CA = m2c(MA, nu) and D11 = exp(-3|u_r|) D11_lin - Xuu |u_r| (XuuITTC) in every call (osv.m before
+    2026-10-07 set the linear surge damping to zero after its first call)."""
 
     def __call__(self, x, ui, Vc=0.0, betaVc=0.0):
         v = OSV
@@ -744,7 +740,7 @@ class OSVModel:
         CRB = rbody(v["m"], v["R44"], v["R55"], v["R66"], nu[3:6], v["r_bg"])[1]
         CA = m2c(v["MA"], nu)
         D = v["D"].copy()
-        D11_lin = D[0, 0] if self.calls == 0 else 0.0
+        D11_lin = D[0, 0]
         Xuu = XuuITTC(nu_r[0], v["rho"], v["L"], v["B"], v["T"], v["Cb"])
         D[0, 0] = np.exp(-3 * abs(nu_r[0])) * D11_lin - Xuu * abs(nu_r[0])
         tau_cf = crossFlowDrag(v["L"], v["B"], v["T"], nu_r)
@@ -754,7 +750,6 @@ class OSVModel:
         tau_thr = np.array([t3[0], t3[1], 0.0, 0.0, 0.0, t3[2]])
         J = eulerang(eta[3], eta[4], eta[5])[0]
         nu_dot = nu_c_dot + v["Minv"] @ (tau_thr + tau_cf - (CRB + CA + D) @ nu_r - v["G"] @ eta)
-        self.calls += 1
         return np.r_[nu_dot, J @ nu], U
 
 #------------------------------------------------------------------------------
