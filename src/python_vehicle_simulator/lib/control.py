@@ -169,22 +169,38 @@ class IntegralSMCheading:
 #------------------------------------------------------------------------------
 
 class PIDnonlinearMIMO:
-    """Nonlinear MIMO PID for DP (MSS PIDnonlinearMIMO.m; persistent eta_d and z_int as attributes):
-    tau = -R(psi)' (Kp e + Ki z_int) - Kd nu, e = eta - eta_d (ssa in yaw), Kp = M_diag wn^2, Kd = 2 M_diag zeta wn,
-    Ki = Kp wn/10; z_int and the setpoint filter eta_d (time constant T_f) are updated by Euler after tau."""
+    """Nonlinear MIMO PID for DP (MSS PIDnonlinearMIMO.m, Algorithm 15.2 of Fossen 2027):
+    tau = -R(psi)' (Kp e + Ki z_int) - Kd nu, e = eta - eta_d (ssa in yaw), Kp = M_diag wn^2, Kd = 2 M_diag zeta wn
+    (no -D term), Ki = Kp wn/10; z_int and the setpoint filter eta_d (time constant T_f) are updated by Euler after
+    tau. The persistent variables of the m-file are attributes: create a new object instead of
+    'clear PIDnonlinearMIMO'. 3-DOF inputs (eta, nu, M of surge, sway, yaw) or 6-DOF inputs as in MSS.
+    ki_scale (not in MSS) scales Ki; 0 gives the PD controller."""
 
-    def __init__(self):
-        self.z_int, self.eta_d = np.zeros(3), np.zeros(3)
+    def __init__(self, ki_scale=1.0):
+        self.eta_d = np.zeros(3)
+        self.z_int = np.zeros(3)
+        self.ki_scale = ki_scale          # not in MSS: 0 gives the PD controller
 
     def __call__(self, eta, nu, eta_ref, M, wn, zeta, T_f, h):
-        eta, nu, eta_ref, M = (np.asarray(v, float) for v in (eta, nu, eta_ref, M))
-        Md = np.diag(np.diag(M))
-        Kp = Md * wn * wn
-        Kd = Md * 2 * zeta * wn
-        Ki = 0.1 * Kp * wn
+        eta, nu, M = np.asarray(eta, float), np.asarray(nu, float), np.asarray(M, float)
+        six = len(nu) == 6
+        if six:
+            eta = eta[[0, 1, 5]]
+            nu = nu[[0, 1, 5]]
+            M = M[np.ix_([0, 1, 5], [0, 1, 5])]
+        R = np.array([[np.cos(eta[2]), -np.sin(eta[2]), 0.0],
+                      [np.sin(eta[2]), np.cos(eta[2]), 0.0],
+                      [0.0, 0.0, 1.0]])
+        M_diag = np.diag(np.diag(M))
+        Kp = M_diag * wn * wn
+        Kd = M_diag * 2 * zeta * wn
+        Ki = 1 / 10 * Kp * wn * self.ki_scale
         e = eta - self.eta_d
         e[2] = ssa(e[2])
-        tau = -Rz(eta[2]).T @ (Kp @ e + Ki @ self.z_int) - Kd @ nu
+        tau_PID = -R.T @ (Kp @ e + Ki @ self.z_int) - Kd @ nu
         self.z_int = self.z_int + h * (eta - self.eta_d)
+        eta_ref = np.asarray(eta_ref, float).ravel()
         self.eta_d = self.eta_d + h * (eta_ref - self.eta_d) / T_f
-        return tau
+        if six:
+            return np.array([tau_PID[0], tau_PID[1], 0, 0, 0, tau_PID[2]])
+        return tau_PID

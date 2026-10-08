@@ -23,3 +23,11 @@ class LowPass:
         y = self.x
         self.x = self.phi * self.x + (1 - self.phi) * u
         return y
+
+#------------------------------------------------------------------------------
+
+def lowPassFilter(xf, u, w_n, h):
+    """First-order low-pass filter w_n/(s + w_n), exact discretization (MSS lowPassFilter.m).
+    Returns (xf_next, y) with the output y = xf at time k."""
+    phi = np.exp(-h * np.asarray(w_n, float))
+    return phi * xf + (1 - phi) * u, xf

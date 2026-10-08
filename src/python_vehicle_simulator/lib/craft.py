@@ -377,3 +377,110 @@ def remus100(x=None, ui=None, Vc=0.0, betaVc=0.0, w_c=0.0, keep_munk=False, re_l
     nu_dot = p["Dnu_c"] + np.linalg.solve(p["M"], rhs)
     xdot = np.concatenate((nu_dot, p["J"] @ p["nu"]))
     return xdot, p["U"], p["M"]
+
+#------------------------------------------------------------------------------
+
+def tanker(x, ui):
+    """MSS tanker.m: the 190 000 dwt Esso tanker, L = 304.8 m, course-unstable (Van Berlekom and Goddard 1972).
+    x = [u v r x y psi delta n], ui = [delta_c, n_c (rpm), h (water depth, m)]. Rudder |delta| <= 10 deg,
+    |delta_dot| <= 2.33 deg/s; a positive rudder angle turns the ship to port. Returns (xdot, U)."""
+    L, T = 304.8, 18.46
+    u, v, r, psi, delta = x[0], x[1], x[2], x[5], x[6]
+    n = x[7] / 60
+    delta_c, n_c, h = ui[0], ui[1] / 60, ui[2]
+    delta_max, Ddelta_max, n_max = 10.0, 2.33, 80.0
+    t_ded, Tm = 0.22, 50.0
+    cun, cnn = 0.605, 38.2
+    Tuu, Tun, Tnn = -0.00695, -0.00063, 0.0000354
+    m11, m22, m33 = 1.050, 2.020, 0.1232
+    d11, d22, d33 = 2.020, -0.752, -0.231
+    Xuuz, YT, NT = -0.0061, 0.04, -0.02
+    Xuu, Yvv, Nvr = -0.0377, -2.400, -0.300
+    Xvv, Yuv, Nuv = 0.3, -1.205, -0.451
+    Xudotz, Yvdotz, Nrdotz = -0.05, -0.387, -0.0045
+    Yurz, Nurz = 0.182, -0.047
+    Xvrz, Yvvz, Nvrz = 0.387, -1.5, -0.120
+    Xccdd, Yuvz, Nuvz = -0.093, 0.0, -0.241
+    Xccbd, Yccd, Nccd = 0.152, 0.208, -0.098
+    Xvvzz, Yccbbd, Nccbbd = 0.0125, -2.16, 0.688
+    Yccbbdz, Nccbbdz = -0.191, 0.344
+    z = T / (h - T)
+    if h < 18.5:
+        raise ValueError("The depth must be larger than the draft (18.5 m)")
+    if z >= 0.8:
+        Yuvz = -0.85 * (1 - 0.8 / z)
+    if abs(delta_c) >= np.deg2rad(delta_max):
+        delta_c = np.sign(delta_c) * np.deg2rad(delta_max)
+    delta_dot = delta_c - delta
+    if abs(delta_dot) >= np.deg2rad(Ddelta_max):
+        delta_dot = np.sign(delta_dot) * np.deg2rad(Ddelta_max)
+    if abs(n_c) >= n_max / 60:
+        n_c = np.sign(n_c) * n_max / 60
+    n_dot = 1 / Tm * (n_c - n) * 60
+    if u <= 0:
+        raise ValueError("u must be larger than zero")
+    beta = np.arctan(v / u)
+    gT = (1 / L * Tuu * u**2 + Tun * u * n + L * Tnn * abs(n) * n)
+    c = np.sqrt(cun * u * n + cnn * n**2)
+    gX = 1 / L * (Xuu * u**2 + L * d11 * v * r + Xvv * v**2 + Xccdd * abs(c) * c * delta**2
+                  + Xccbd * abs(c) * c * beta * delta + L * gT * (1 - t_ded) + Xuuz * u**2 * z
+                  + L * Xvrz * v * r * z + Xvvzz * v**2 * z**2)
+    gY = 1 / L * (Yuv * u * v + Yvv * abs(v) * v + Yccd * abs(c) * c * delta + L * d22 * u * r
+                  + Yccbbd * abs(c) * c * abs(beta) * beta * abs(delta) + YT * gT * L
+                  + L * Yurz * u * r * z + Yuvz * u * v * z + Yvvz * abs(v) * v * z
+                  + Yccbbdz * abs(c) * c * abs(beta) * beta * abs(delta) * z)
+    gLN = (Nuv * u * v + L * Nvr * abs(v) * r + Nccd * abs(c) * c * delta + L * d33 * u * r
+           + Nccbbd * abs(c) * c * abs(beta) * beta * abs(delta) + L * NT * gT
+           + L * Nurz * u * r * z + Nuvz * u * v * z + L * Nvrz * abs(v) * r * z
+           + Nccbbdz * abs(c) * c * abs(beta) * beta * abs(delta) * z)
+    m11, m22, m33 = m11 - Xudotz * z, m22 - Yvdotz * z, m33 - Nrdotz * z
+    xdot = np.array([gX / m11, gY / m22, gLN / (L**2 * m33),
+                     np.cos(psi) * u - np.sin(psi) * v, np.sin(psi) * u + np.cos(psi) * v, r, delta_dot, n_dot])
+    return xdot, np.sqrt(x[0]**2 + x[1]**2)
+
+#------------------------------------------------------------------------------
+
+def DSRV(x, u):
+    """Pitch-depth model of the deep submergence rescue vehicle, x = [w, q, x, z, theta], u = delta_s (rad)
+    (MSS DSRV.m, data of Healey 1992). The hydrodynamic data are the non-dimensional values of the reference;
+    DSRV.m uses them directly in the state equations, and so does this port. Returns (xdot, U)."""
+    x = np.asarray(x, float)
+    U0, W0 = 4.11, 0.0
+    U = np.sqrt(U0**2 + (W0 + x[0]) ** 2)
+    delta_s = sat(float(np.atleast_1d(u)[0]), 30 * D2R)
+    w, q, theta = x[0], x[1], x[4]
+    Iy, m = 0.001925, 0.036391
+    Mqdot, Zqdot, Mwdot, Zwdot = -0.001573, -0.000130, -0.000146, -0.031545
+    Mq, Zq, Mw, Zw = -0.01131, -0.017455, 0.011175, -0.043938
+    Mtheta = -0.156276 / U**2
+    Mdelta, Zdelta = -0.012797, 0.027695
+    m11, m12, m22, m21 = m - Zwdot, -Zqdot, Iy - Mqdot, -Mwdot
+    detM = m11 * m22 - m12 * m21
+    Z = Zq * q + Zw * w + Zdelta * delta_s
+    Mm = Mq * q + Mw * w + Mtheta * theta + Mdelta * delta_s
+    return np.array([(m22 * Z - m12 * Mm) / detM, (-m21 * Z + m11 * Mm) / detM,
+                     np.cos(theta) * U0 + np.sin(theta) * w, -np.sin(theta) * U0 + np.cos(theta) * w, q]), U
+
+#------------------------------------------------------------------------------
+
+SEMISUB = dict(
+    MRB=1.0e10 * np.array([[0.0027, 0, 0, 0, -0.0530, 0],
+                           [0, 0.0027, 0, 0.0530, 0, -0.0014],
+                           [0, 0, 0.0027, 0, 0.0014, 0],
+                           [0, 0.0530, 0, 3.4775, 0, -0.0265],
+                           [-0.0530, 0, 0.0014, 0, 3.8150, 0],
+                           [0, -0.0014, 0, -0.0265, 0, 3.7192]]),
+    MA=1.0e10 * np.array([[0.0017, 0, 0, 0, -0.0255, 0],
+                          [0, 0.0042, 0, 0.0365, 0, 0],
+                          [0, 0, 0.0021, 0, 0, 0],
+                          [0, 0.0365, 0, 1.3416, 0, 0],
+                          [-0.0255, 0, 0, 0, 2.2267, 0],
+                          [0, 0, 0, 0, 0, 3.2049]]),
+    D=1.0e9 * np.array([[0.0004, 0, 0, 0, -0.0085, 0],
+                        [0, 0.0003, 0, 0.0067, 0, -0.0002],
+                        [0, 0, 0.0034, 0, 0.0017, 0],
+                        [0, 0.0067, 0, 4.8841, 0, -0.0034],
+                        [-0.0085, 0, 0.0017, 0, 7.1383, 0],
+                        [0, -0.0002, 0, -0.0034, 0, 0.8656]]),
+    G=1.0e10 * np.diag([0, 0, 0.0006, 1.4296, 2.6212, 0]))
+SEMISUB["M"] = SEMISUB["MRB"] + SEMISUB["MA"]

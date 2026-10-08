@@ -14,3 +14,4 @@ from .craft import *
 from .environment import *
 from .ins import *
 from .navigation import *
+from .maneuvering import *
