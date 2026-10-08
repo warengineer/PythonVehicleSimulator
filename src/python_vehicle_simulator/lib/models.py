@@ -224,3 +224,36 @@ def Dmtrx(T_126, zeta_45, MRB, MA, hydrostatics):
 def addedMassSurge(m, L, rho=1025.0):
     """Added mass in surge, A11 = -Xudot = 2.7 rho nabla^(5/3) / L^2 (Soding 1982; MSS addedMassSurge.m)."""
     return 2.7 * rho * (m / rho)**(5.0 / 3.0) / L**2
+
+#------------------------------------------------------------------------------
+
+def rbody(m, R44, R55, R66, nu2, r_bG):
+    """Rigid-body MRB and CRB(nu2) about the CO from the mass and the radii of gyration about the CG (MSS rbody.m)."""
+    I_G = m * np.diag([R44**2, R55**2, R66**2])
+    MRB_CG = np.zeros((6, 6))
+    MRB_CG[0:3, 0:3], MRB_CG[3:6, 3:6] = m * np.eye(3), I_G
+    CRB_CG = np.zeros((6, 6))
+    CRB_CG[0:3, 0:3] = m * Smtrx(nu2)
+    CRB_CG[3:6, 3:6] = -Smtrx(I_G @ np.asarray(nu2, float))
+    H = Hmtrx(np.asarray(r_bG, float).ravel())
+    return H.T @ MRB_CG @ H, H.T @ CRB_CG @ H
+
+#------------------------------------------------------------------------------
+
+def Gmtrx(nabla, A_wp, GMT, GML, x_F, r_bP, rho=1025.0, g=9.81):
+    """6 x 6 restoring matrix of a floating vessel about the point r_bP (MSS Gmtrx.m): G_CF = diag(0, 0, rho g A_wp,
+    rho g nabla GMT, rho g nabla GML, 0) in the centre of flotation (x_F, 0, 0), moved with H(r)' G H(r)."""
+    G_CF = np.diag([0.0, 0.0, rho * g * A_wp, rho * g * nabla * GMT, rho * g * nabla * GML, 0.0])
+    HF = Hmtrx(np.array([x_F, 0.0, 0.0]))
+    HP = Hmtrx(np.asarray(r_bP, float))
+    return HP.T @ (HF.T @ G_CF @ HF) @ HP
+
+#------------------------------------------------------------------------------
+
+def XuuITTC(u_r, rho, L, B, T, C_B=0.65):
+    """Quadratic surge damping X = Xuu |u_r| u_r from the ITTC-1957 line (MSS XuuITTC.m, 2026-09-28): Re = max(L|u_r|/nu,
+    1e5), Cf = 0.075/(log10 Re - 2)^2, Mumford wetted surface S = 1.025 L (C_B B + 1.7 T), form factor k = 0.1."""
+    Re = max(L * abs(u_r) / 1e-6, 1e5)
+    Cf = 0.075 / (np.log10(Re) - 2) ** 2
+    S = 1.025 * L * (C_B * B + 1.7 * T)
+    return -0.5 * rho * S * (1 + 0.1) * Cf

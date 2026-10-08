@@ -17,6 +17,9 @@ from .models import Dmtrx, imlay61, spheroid
 from .numerics import interp1_extrap
 from .gnc import Hmtrx, Hoerner, Rzyx, Smtrx, m2c, satlim
 from .models import addedMassSurge
+from .allocation import thrConfig
+from .models import Gmtrx, XuuITTC, rbody
+from .numerics import invQR
 
 
 #------------------------------------------------------------------------------
@@ -270,12 +273,12 @@ def supply_matrices():
 
 def supply(x, tau):
     """Linear DP model of a supply vessel, L = 76.2 m (MSS supply.m): x = [x, y, psi, u, v, r],
-    xdot = [R(psi) nu; M^-1 (tau - D nu)]. Returns (xdot, U)."""
+    xdot = [R(psi) nu; M^-1 (tau - D nu)]. Returns (xdot, U, M, D) as supply.m."""
     x = np.asarray(x, float)
     M, D = supply_matrices()
     nu = x[3:6]
     xdot = np.r_[Rz(x[2]) @ nu, np.linalg.solve(M, np.asarray(tau, float) - D @ nu)]
-    return xdot, np.hypot(x[3], x[4])
+    return xdot, np.hypot(x[3], x[4]), M, D
 
 #------------------------------------------------------------------------------
 
@@ -641,3 +644,81 @@ class Otter:
 #------------------------------------------------------------------------------
 
 STRIPS = 20
+
+#------------------------------------------------------------------------------
+
+def _osv_data():
+    v = dict(L=83.0, B=18.0, T=5.0, rho=1025.0, Cb=0.65)
+    v["K_max"] = np.array([300e3, 300e3, 420e3, 655e3])
+    v["n_max"] = np.array([140.0, 140.0, 150.0, 200.0])
+    v["K_thr"] = np.diag(v["K_max"] / v["n_max"] ** 2)
+    v["l_x"] = np.array([37.0, 35.0, -v["L"] / 2, -v["L"] / 2])
+    v["l_y"] = np.array([0.0, 0.0, 7.0, -7.0])
+    v["nabla"] = v["Cb"] * v["L"] * v["B"] * v["T"]
+    v["m"] = v["rho"] * v["nabla"]
+    v["r_bg"] = np.array([-4.5, 0.0, -1.2])
+    Cw = 0.8
+    v["Awp"] = Cw * v["B"] * v["L"]
+    KB = (1 / 3) * (5 * v["T"] / 2 - v["nabla"] / v["Awp"])
+    k_ms = (6 * Cw**3) / ((1 + Cw) * (1 + 2 * Cw))
+    r_bb = np.array([-4.5, 0.0, v["T"] - KB])
+    BG = r_bb[2] - v["r_bg"][2]
+    I_T = k_ms * (v["B"] ** 3 * v["L"]) / 12
+    I_L = 0.7 * (v["L"] ** 3 * v["B"]) / 12
+    v["GM_T"], v["GM_L"] = I_T / v["nabla"] - BG, I_L / v["nabla"] - BG
+    v["G"] = Gmtrx(v["nabla"], v["Awp"], v["GM_T"], v["GM_L"], -0.5, np.zeros(3))
+    v["R44"], v["R55"], v["R66"] = 0.35 * v["B"], 0.25 * v["L"], 0.25 * v["L"]
+    v["MRB"] = rbody(v["m"], v["R44"], v["R55"], v["R66"], np.zeros(3), v["r_bg"])[0]
+    v["MA"] = 1e9 * np.array([[0.0010, 0, 0, 0, 0, 0], [0, 0.0034, 0, 0.0047, 0, 0.0107],
+                              [0, 0, 0.0083, 0, 0.0529, 0], [0, 0.0047, 0, 0.0840, 0, -0.1282],
+                              [0, 0, 0.0529, 0, 3.5072, 0], [0, 0.0107, 0, -0.1282, 0, 1.7444]])
+    v["M"] = v["MRB"] + v["MA"]
+    v["Minv"] = invQR(v["M"])
+    v["D"] = Dmtrx([100.0, 100.0, 1.0], [0.15, 0.3], v["MRB"], v["MA"], v["G"])
+    return v
+
+#------------------------------------------------------------------------------
+
+OSV = _osv_data()
+
+#------------------------------------------------------------------------------
+
+class OSVModel:
+    """xdot = osv(x, ui, Vc, betaVc) of MSS (osv.m, version of the MSS master branch on 7 October 2026), 6 DOF,
+    x = [u v w p q r  x y z  phi theta psi], ui = [n1, n2, n3, n4, alpha1, alpha2] (shaft speeds, azimuth angles in rad).
+    eta_dot = J(eta) nu, nu_dot = nu_c_dot + M^-1 (tau_thr + tau_crossflow - (CRB + CA + D) nu_r - G eta) with
+    CA = m2c(MA, nu) and D11 = exp(-3|u_r|) D11_lin - Xuu |u_r| (XuuITTC). osv.m keeps its data in a persistent
+    structure and sets vessel.D(1,1) = 0 at the end of its first call, so from the second call on the linear surge
+    damping is gone; SIMosv.m calls osv() twice before its loop. calls_before = number of earlier calls."""
+
+    def __init__(self, calls_before=2):
+        self.calls = calls_before
+
+    def __call__(self, x, ui, Vc=0.0, betaVc=0.0):
+        v = OSV
+        x, ui = np.asarray(x, float), np.asarray(ui, float)
+        nu, eta = x[0:6], x[6:12]
+        U = np.hypot(nu[0], nu[1])
+        v_c = np.array([Vc * np.cos(betaVc - eta[5]), Vc * np.sin(betaVc - eta[5]), 0.0])
+        nu_c = np.r_[v_c, np.zeros(3)]
+        nu_c_dot = np.r_[-Smtrx(nu[3:6]) @ v_c, np.zeros(3)]
+        nu_r = nu - nu_c
+        CRB = rbody(v["m"], v["R44"], v["R55"], v["R66"], nu[3:6], v["r_bg"])[1]
+        CA = m2c(v["MA"], nu)
+        D = v["D"].copy()
+        D11_lin = D[0, 0] if self.calls == 0 else 0.0
+        Xuu = XuuITTC(nu_r[0], v["rho"], v["L"], v["B"], v["T"], v["Cb"])
+        D[0, 0] = np.exp(-3 * abs(nu_r[0])) * D11_lin - Xuu * abs(nu_r[0])
+        tau_cf = crossFlowDrag(v["L"], v["B"], v["T"], nu_r)
+        u_thr = np.abs(ui[0:4]) * ui[0:4]
+        T_thr = thrConfig(["T", "T", ui[4], ui[5]], v["l_x"], v["l_y"])
+        t3 = T_thr @ v["K_thr"] @ u_thr
+        tau_thr = np.array([t3[0], t3[1], 0.0, 0.0, 0.0, t3[2]])
+        J = eulerang(eta[3], eta[4], eta[5])[0]
+        nu_dot = nu_c_dot + v["Minv"] @ (tau_thr + tau_cf - (CRB + CA + D) @ nu_r - v["G"] @ eta)
+        self.calls += 1
+        return np.r_[nu_dot, J @ nu], U
+
+#------------------------------------------------------------------------------
+
+osv = OSVModel()                        # the state of osv.m inside the loop of SIMosv.m (D11_lin already zeroed)
