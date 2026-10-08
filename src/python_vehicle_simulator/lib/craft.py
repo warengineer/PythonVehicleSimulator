@@ -20,6 +20,7 @@ from .models import addedMassSurge
 from .allocation import thrConfig
 from .models import Gmtrx, XuuITTC, rbody
 from .numerics import invQR
+from .gnc import gvect
 
 
 #------------------------------------------------------------------------------
@@ -120,17 +121,27 @@ CONT = dict(
 
 #------------------------------------------------------------------------------
 
-def _container_core(x, ui, delta_max, Ddelta_max, uP_cos, K_wave):
-    """Shared core of container.m and RRDcontainer (exRRD2.m): x = [u v r x y psi p phi delta n (xw1 xw2)],
-    ui = [delta_c, n_c (rpm)]. uP_cos: RRDcontainer writes uP = cos(v) (...) where container.m writes u (...);
-    K_wave is the wave roll moment added to K (nondimensional). Returns the first ten state derivatives and U."""
+def container_parts(x, ui, delta_max=10.0, Ddelta_max=5.0, kk=None, uP_cos=False, K_wave=0.0):
+    """Container ship of MSS container.m (Son and Nomoto 1982), x = [u v r x y psi p phi delta n] (m/s, rad/s, m,
+    rad, rpm), ui = [delta_c (rad), n_c (rpm)]. Returns a dict with xdot, U and the propeller and rudder quantities
+    (nondimensional as in the m-file, and dimensional: thrust, rudder normal force and the rudder forces in N, N m).
+    delta_max (deg), Ddelta_max (deg/s) and the slipstream factor kk (0.631) are options with the values of
+    container.m as defaults (not in MSS). RRDcontainer of exRRD2.m writes uP with cos(v) instead of u
+    (uP_cos=True) and adds the wave roll moment K_wave (nondimensional) to K."""
     P = CONT
+    x, ui = np.asarray(x, float), np.asarray(ui, float)
+    if len(x) != 10:
+        raise ValueError("x-vector must have dimension 10 !")
+    if len(ui) != 2:
+        raise ValueError("u-vector must have dimension  2 !")
     L = P["L"]
     U = np.sqrt(x[0]**2 + x[1]**2)
     if U <= 0:
         raise ValueError("The ship must have speed greater than zero")
     if x[9] <= 0:
-        raise ValueError("The propeller rpm must be greater than zero")
+        raise ValueError("The propeller RPM must be greater than zero")
+    kk = P["kk"] if kk is None else kk
+    # nondimensional states and inputs (prime system: speeds / U, rates * L / U)
     delta_c = ui[0]
     n_c = ui[1] / 60 * L / U
     u, v = x[0] / U, x[1] / U
@@ -141,38 +152,45 @@ def _container_core(x, ui, delta_max, Ddelta_max, uP_cos, K_wave):
     W = P["rho"] * P["g"] * P["nabla"] / (P["rho"] * L**2 * U**2 / 2)
     m11, m22, m32, m42 = m + mx, m + my, -my * P["ly"], my * P["alphay"]
     m33, m44 = P["Ix"] + P["Jx"], P["Iz"] + P["Jz"]
+    # rudder saturation and dynamics (steering machine: angle limit, first-order servo, rate limit)
     if abs(delta_c) >= delta_max * np.pi / 180:
         delta_c = np.sign(delta_c) * delta_max * np.pi / 180
     delta_dot = delta_c - delta
     if abs(delta_dot) >= Ddelta_max * np.pi / 180:
         delta_dot = np.sign(delta_dot) * Ddelta_max * np.pi / 180
+    # shaft speed saturation and dynamics (n and n_c in rps here)
     n_c, n = n_c * U / L, n * U / L
     if abs(n_c) >= P["n_max"] / 60:
         n_c = np.sign(n_c) * P["n_max"] / 60
     Tm = 5.65 / n if n > 0.3 else 18.83
     n_dot = 1 / Tm * (n_c - n) * 60
+    # propeller and rudder in the slipstream (prime system)
     vR = P["ga"] * v + P["cRr"] * r + P["cRrrr"] * r**3 + P["cRrrv"] * r**2 * v
     uP = (np.cos(v) if uP_cos else u) * ((1 - P["wp"]) + P["tau"] * ((v + P["xp"] * r)**2
                                                                      + P["cpv"] * v + P["cpr"] * r))
-    J = uP * U / (n * P["D"])
+    J = uP * U / (n * P["D"])                         # advance number
     KT = 0.527 - 0.455 * J
-    uR = uP * P["epsilon"] * np.sqrt(1 + 8 * P["kk"] * KT / (np.pi * J**2))
-    alphaR = delta + np.arctan(vR / uR)
-    FN = -((6.13 * P["Delta"]) / (P["Delta"] + 2.25)) * (P["AR"] / L**2) * (uR**2 + vR**2) * np.sin(alphaR)
+    uR = uP * P["epsilon"] * np.sqrt(1 + 8 * kk * KT / (np.pi * J**2))
+    alphaR = delta + np.arctan(vR / uR)               # effective rudder angle
+    f_alpha = (6.13 * P["Delta"]) / (P["Delta"] + 2.25)   # Fujii, per rad
+    FN = -f_alpha * (P["AR"] / L**2) * (uR**2 + vR**2) * np.sin(alphaR)
     T = 2 * P["rho"] * P["D"]**4 / (U**2 * L**2 * P["rho"]) * KT * n * abs(n)
+    XR = P["cRX"] * FN * np.sin(delta)                # c_RX = 1 - t_R
+    YR = (1 + P["aH"]) * FN * np.cos(delta)
+    KR = -(1 + P["aH"]) * P["zR"] * FN * np.cos(delta)
+    NR = (P["xR"] + P["aH"] * P["xH"]) * FN * np.cos(delta)
+    # forces and moments (nondimensional)
     X = (P["Xuu"] * u**2 + (1 - P["t"]) * T + P["Xvr"] * v * r + P["Xvv"] * v**2 + P["Xrr"] * r**2
-         + P["Xphiphi"] * phi**2 + P["cRX"] * FN * np.sin(delta) + (m + my) * v * r)
+         + P["Xphiphi"] * phi**2 + XR + (m + my) * v * r)
     Y = (P["Yv"] * v + P["Yr"] * r + P["Yp"] * p + P["Yphi"] * phi + P["Yvvv"] * v**3 + P["Yrrr"] * r**3
          + P["Yvvr"] * v**2 * r + P["Yvrr"] * v * r**2 + P["Yvvphi"] * v**2 * phi + P["Yvphiphi"] * v * phi**2
-         + P["Yrrphi"] * r**2 * phi + P["Yrphiphi"] * r * phi**2 + (1 + P["aH"]) * FN * np.cos(delta)
-         - (m + mx) * u * r)
+         + P["Yrrphi"] * r**2 * phi + P["Yrphiphi"] * r * phi**2 + YR - (m + mx) * u * r)
     K = (P["Kv"] * v + P["Kr"] * r + P["Kp"] * p + P["Kphi"] * phi + P["Kvvv"] * v**3 + P["Krrr"] * r**3
          + P["Kvvr"] * v**2 * r + P["Kvrr"] * v * r**2 + P["Kvvphi"] * v**2 * phi + P["Kvphiphi"] * v * phi**2
-         + P["Krrphi"] * r**2 * phi + P["Krphiphi"] * r * phi**2 - (1 + P["aH"]) * P["zR"] * FN * np.cos(delta)
-         + mx * P["lx"] * u * r - W * P["GM"] * phi)
+         + P["Krrphi"] * r**2 * phi + P["Krphiphi"] * r * phi**2 + KR + mx * P["lx"] * u * r - W * P["GM"] * phi)
     N = (P["Nv"] * v + P["Nr"] * r + P["Np"] * p + P["Nphi"] * phi + P["Nvvv"] * v**3 + P["Nrrr"] * r**3
          + P["Nvvr"] * v**2 * r + P["Nvrr"] * v * r**2 + P["Nvvphi"] * v**2 * phi + P["Nvphiphi"] * v * phi**2
-         + P["Nrrphi"] * r**2 * phi + P["Nrphiphi"] * r * phi**2 + (P["xR"] + P["aH"] * P["xH"]) * FN * np.cos(delta))
+         + P["Nrrphi"] * r**2 * phi + P["Nrphiphi"] * r * phi**2 + NR)
     K = K + K_wave
     detM = m22 * m33 * m44 - m32**2 * m44 - m42**2 * m33
     xdot = np.array([
@@ -186,17 +204,21 @@ def _container_core(x, ui, delta_max, Ddelta_max, uP_cos, K_wave):
         p * (U / L),
         delta_dot,
         n_dot])
-    return xdot, U
+    qF, qM = 0.5 * P["rho"] * U**2 * L**2, 0.5 * P["rho"] * U**2 * L**3      # prime scaling of forces, moments
+    return dict(xdot=xdot, U=U, uP=uP * U, J=J, KT=KT, uR=uR * U, vR=vR * U, alphaR=alphaR, f_alpha=f_alpha,
+                FN=FN * qF, thrust=T * qF, X_R=XR * qF, Y_R=YR * qF, K_R=KR * qM, N_R=NR * qM, Tm=Tm,
+                n_rps=n, n_c_rps=n_c, delta_dot=delta_dot, n_dot=n_dot, X=X * qF, Y=Y * qF, K=K * qM, N=N * qM,
+                resistance=P["Xuu"] * u**2 * qF)
+
 
 #------------------------------------------------------------------------------
 
-def container(x, ui):
+def container(x, ui, delta_max=10.0, Ddelta_max=5.0, kk=None):
     """MSS container.m (Son and Nomoto 1982), x = [u v r x y psi p phi delta n] (m/s, rad/s, m, rad, rpm),
-    ui = [delta_c (rad), n_c (rpm)]; rudder 10 deg and 5 deg/s. Returns (xdot, U)."""
-    x, ui = np.asarray(x, float), np.asarray(ui, float)
-    if len(x) != 10:
-        raise ValueError("x-vector must have dimension 10 !")
-    return _container_core(x, ui, 10.0, 5.0, False, 0.0)
+    ui = [delta_c (rad), n_c (rpm)]; rudder 10 deg and 5 deg/s. Returns (xdot, U); container_parts returns every
+    force term."""
+    p = container_parts(x, ui, delta_max, Ddelta_max, kk)
+    return p["xdot"], p["U"]
 
 #------------------------------------------------------------------------------
 
@@ -210,7 +232,8 @@ def RRDcontainer(x, ui, w_noise):
     Kw, w_wave = 0.0001, 1.0
     Aw = np.array([[0.0, 1.0], [-w_wave**2, -2 * 0.1 * w_wave]])
     Bw = np.array([0.0, Kw])
-    xdot10, U = _container_core(x, np.asarray(ui, float), 20.0, 20.0, True, x[10])
+    p = container_parts(x[0:10], ui, 20.0, 20.0, None, True, x[10])
+    xdot10, U = p["xdot"], p["U"]
     return np.r_[xdot10, Aw @ x[10:12] + Bw * w_noise], U
 
 #------------------------------------------------------------------------------
@@ -666,6 +689,7 @@ def _osv_data():
     v["K_thr"] = np.diag(v["K_max"] / v["n_max"] ** 2)
     v["l_x"] = np.array([37.0, 35.0, -v["L"] / 2, -v["L"] / 2])
     v["l_y"] = np.array([0.0, 0.0, 7.0, -7.0])
+    v["U_max"] = 7.7                                             # max cruise speed (m/s) of osv.m
     v["nabla"] = v["Cb"] * v["L"] * v["B"] * v["T"]
     v["m"] = v["rho"] * v["nabla"]
     v["r_bg"] = np.array([-4.5, 0.0, -1.2])
@@ -734,3 +758,229 @@ class OSVModel:
 #------------------------------------------------------------------------------
 
 osv = OSVModel()                        # the state of osv.m inside the loop of SIMosv.m (D11_lin already zeroed)
+
+#------------------------------------------------------------------------------
+
+NAVAL = dict(rho=1014.0, g=9.81, Lpp=51.5, B=8.6, D=2.3, disp=357.0, Izz=47.934e6, Ixx=2.3763e6, U_nom=8.0,
+             KM=4.47, KB=1.53, gm=1.1, LCG=20.41, VCG=3.36, xG=-3.38, Dp=1.6,
+             rudder=dict(sp=1.5, A=1.5, ar=3.0, dCL=0.054, stall=23.0),
+             Xudot=-17400.0, Xuau=-1.96e3, Xvr_m=0.33,
+             Yvdot=-393000.0, Ypdot=-296000.0, Yrdot=-1400000.0, Yauv=-11800.0, Yur=131000.0, Yvav=-3700.0,
+             Yrar=0.0, Yvar=-794000.0, Yrav=-182000.0, Ybauv=10800.0, Ybaur=251000.0, Ybuu=-74.0,
+             Kvdot=296000.0, Kpdot=-774000.0, Krdot=0.0, Kauv=9260.0, Kur=-102000.0, Kvav=29300.0, Krar=0.0,
+             Kvar=621000.0, Krav=142000.0, Kbauv=-8400.0, Kbaur=-196000.0, Kbuu=-1180.0, Kaup=-15500.0,
+             Kpap=-416000.0, Kp=-500000.0, Kbbb_mg=-0.325,
+             Nvdot=538000.0, Npdot=0.0, Nrdot=-38.7e6, Nauv=-92000.0, Naur=-4710000.0, Nvav=0.0, Nrar=-202000000.0,
+             Nvar=0.0, Nrav=-15600000.0, Nbauv=-214000.0, Nbuar=-4980000.0, Nbuau=-8000.0)
+
+#------------------------------------------------------------------------------
+
+def navalvessel(x, tau):
+    """Naval vessel of MSS navalvessel.m (Blanke and Christensen 1993; data of T. Perez): x = [u v p r phi psi],
+    tau = [Xe Ye Ke Ne] (external forces, e.g. thrust, rudder and fins). Returns xdot (6) and U."""
+    h = NAVAL
+    x, tau = np.asarray(x, float), np.asarray(tau, float)
+    m = h["disp"] * h["rho"]
+    zG = -(h["VCG"] - h["D"])
+    xG = h["xG"]
+    u, v, p, r, b = x[0], x[1], x[2], x[3], x[4]
+    U = np.sqrt(u**2 + v**2)
+    Xe, Ye, Ke, Ne = tau
+    au, av, ar, ap = abs(u), abs(v), abs(r), abs(p)
+    M = np.array([[m - h["Xudot"], 0, 0, 0, 0, 0],
+                  [0, m - h["Yvdot"], -(m * zG + h["Ypdot"]), m * xG - h["Yrdot"], 0, 0],
+                  [0, -(m * zG + h["Kvdot"]), h["Ixx"] - h["Kpdot"], -h["Krdot"], 0, 0],
+                  [0, m * xG - h["Nvdot"], -h["Npdot"], h["Izz"] - h["Nrdot"], 0, 0],
+                  [0, 0, 0, 0, 1, 0],
+                  [0, 0, 0, 0, 0, 1]], float)
+    Xh = h["Xuau"] * u * au + h["Xvr_m"] * m * v * r
+    Yh = (h["Yauv"] * au * v + h["Yur"] * u * r + h["Yvav"] * v * av + h["Yvar"] * v * ar + h["Yrav"] * r * av
+          + h["Ybauv"] * b * abs(u * v) + h["Ybaur"] * b * abs(u * r) + h["Ybuu"] * b * u**2)
+    Kh = (h["Kauv"] * au * v + h["Kur"] * u * r + h["Kvav"] * v * av + h["Kvar"] * v * ar + h["Krav"] * r * av
+          + h["Kbauv"] * b * abs(u * v) + h["Kbaur"] * b * abs(u * r) + h["Kbuu"] * b * u**2 + h["Kaup"] * au * p
+          + h["Kpap"] * p * ap + h["Kp"] * p + h["Kbbb_mg"] * m * h["g"] * b**3
+          - (h["rho"] * h["g"] * h["gm"] * h["disp"]) * b)
+    Nh = (h["Nauv"] * au * v + h["Naur"] * au * r + h["Nrar"] * r * ar + h["Nrav"] * r * av
+          + h["Nbauv"] * b * abs(u * b) + h["Nbuar"] * b * u * ar + h["Nbuau"] * b * u * au)
+    Xc = m * (r * v + xG * r**2 - zG * p * r)
+    Yc = -m * u * r
+    Kc = m * zG * u * r
+    Nc = -m * xG * u * r
+    F = np.array([Xh + Xc + Xe, Yh + Yc + Ye, Kh + Kc + Ke, Nh + Nc + Ne, p, r])
+    return np.linalg.solve(M, F), U
+
+#------------------------------------------------------------------------------
+
+NPS = dict(L=5.3, g=9.81, xG=0.0, yG=0.0, zG=0.061, xB=0.0, yB=0.0, zB=0.0, W=53400.0, B=53400.0, rho=1025.0,
+           Ix=2038.0, Iy=13587.0, Iz=13587.0, Ixy=-13.58, Iyz=-13.58, Ixz=-13.58, Cdy=0.5, Cdz=0.6,
+           T_actuator=0.1, max_u=np.array([20 * D2R, 20 * D2R, 20 * D2R, 20 * D2R, 1500.0]),
+           Xpp=7.0e-3, Xqq=-1.5e-2, Xrr=4.0e-3, Xpr=7.5e-4, Xudot=-7.6e-3, Xwq=-2.0e-1, Xvp=-3.0e-3, Xvr=2.0e-2,
+           Xqds=2.5e-2, Xqdb2=-1.3e-3, Xrdr=-1.0e-3, Xvv=5.3e-2, Xww=1.7e-1, Xvdr=1.7e-3, Xwds=4.6e-2,
+           Xwdb2=0.5e-2, Xdsds=-1.0e-2, Xdrdr=-1.0e-2, Xqdsn=2.0e-3, Xwdsn=3.5e-3, Xdsdsn=-1.6e-3,
+           Ypdot=1.2e-4, Yrdot=1.2e-3, Ypq=4.0e-3, Yqr=-6.5e-3, Yvdot=-5.5e-2, Yp=3.0e-3, Yr=3.0e-2, Yvq=2.4e-2,
+           Ywp=2.3e-1, Ywr=-1.9e-2, Yv=-1.0e-1, Yvw=6.8e-2, Ydr=2.7e-2,
+           Zqdot=-6.8e-3, Zpp=1.3e-4, Zpr=6.7e-3, Zrr=-7.4e-3, Zwdot=-2.4e-1, Zq=-1.4e-1, Zvp=-4.8e-2, Zvr=4.5e-2,
+           Zw=-3.0e-1, Zvv=-6.8e-2, Zds=-7.3e-2, Zdb2=-1.3e-2, Zqn=-2.9e-3, Zwn=-5.1e-3, Zdsn=-1.0e-2,
+           Kpdot=-1.0e-3, Krdot=-3.4e-5, Kpq=-6.9e-5, Kqr=1.7e-2, Kvdot=1.2e-4, Kp=-1.1e-2, Kr=-8.4e-4,
+           Kvq=-5.1e-3, Kwp=-1.3e-4, Kwr=1.4e-2, Kv=3.1e-3, Kvw=-1.9e-1, Kdb2=0.0, Kpn=-5.7e-4, Kprop=0.0,
+           Mqdot=-1.7e-2, Mpp=5.3e-5, Mpr=5.0e-3, Mrr=2.9e-3, Mwdot=-6.8e-3, Muq=-6.8e-2, Mvp=1.2e-3,
+           Mvr=1.7e-2, Muw=1.0e-1, Mvv=-2.6e-2, Mds=-4.1e-2, Mdb2=3.5e-3, Mqn=-1.6e-3, Mwn=-2.9e-3, Mdsn=-5.2e-3,
+           Npdot=-3.4e-5, Nrdot=-3.4e-3, Npq=-2.1e-2, Nqr=2.7e-3, Nvdot=1.2e-3, Np=-8.4e-4, Nr=-1.6e-2,
+           Nvq=-1.0e-2, Nwp=-1.7e-2, Nwr=7.4e-3, Nv=-7.4e-3, Nvw=-2.7e-2, Ndr=-1.3e-2, Nprop=0.0)
+
+#------------------------------------------------------------------------------
+
+def npsauv_matrices():
+    """Mass matrix M = MRB + MA of npsauv.m (prime-scaled added mass, Fossen 2021, Appendix D.2)."""
+    h = NPS
+    L, rho = h["L"], h["rho"]
+    mass = h["W"] / h["g"]
+    r3 = 0.5 * rho * L**3
+    Tinv = np.diag([1.0, 1.0, 1.0, L, L, L])
+    I_g = np.array([[h["Ix"], -h["Ixy"], -h["Ixz"]], [-h["Ixy"], h["Iy"], -h["Iyz"]], [-h["Ixz"], -h["Iyz"], h["Iz"]]])
+    r_bg = np.array([h["xG"], h["yG"], h["zG"]])
+    MRB = np.block([[mass * np.eye(3), -mass * Smtrx(r_bg)], [mass * Smtrx(r_bg), I_g]])
+    MA = -np.array([[h["Xudot"], 0, 0, 0, 0, 0],
+                    [0, h["Yvdot"], 0, h["Ypdot"], 0, h["Yrdot"]],
+                    [0, 0, h["Zwdot"], 0, h["Zqdot"], 0],
+                    [0, h["Kvdot"], 0, h["Kpdot"], 0, h["Krdot"]],
+                    [0, 0, h["Mwdot"], 0, h["Mqdot"], 0],
+                    [0, h["Nvdot"], 0, h["Npdot"], 0, h["Nrdot"]]], float)
+    MA = r3 * Tinv @ MA @ Tinv
+    return MRB + MA, MRB, MA
+
+#------------------------------------------------------------------------------
+
+def npsauv(x, ui, Vc=0.0, betaVc=0.0, w_c=0.0, cm_sign=1.0):
+    """NPS AUV of MSS npsauv.m (Healey and Lienard 1993), 17 states x = [u v w p q r x y z phi theta psi delta_r
+    delta_s delta_bp delta_bs n] (m/s, rad/s, m, rad, rpm), ui = [delta_r_c delta_s_c delta_bp_c delta_bs_c n_c].
+    cm_sign is an option (not in MSS): cm_sign=-1 uses w_r - x q instead of w_r + x q in the cross-flow
+    pitch strip (the heave strip of npsauv.m uses w_r - x q). Returns xdot (17), U and a dict with tau_control."""
+    h = NPS
+    x, ui = np.asarray(x, float), np.asarray(ui, float)
+    if len(x) != 17:
+        raise ValueError("x-vector must have dimension 17!")
+    if len(ui) != 5:
+        raise ValueError("u-vector must have dimension 5!")
+    u, v, w, p, q, r = x[0:6]
+    phi, theta, psi = x[9:12]
+    U = np.sqrt(u**2 + v**2 + w**2)
+    u_c, v_c = Vc * np.cos(betaVc - psi), Vc * np.sin(betaVc - psi)
+    u_r, v_r, w_r = u - u_c, v - v_c, w - w_c
+    Dnu_c = np.array([v_c * r, -u_c * r, 0.0, 0.0, 0.0, 0.0])
+    # actuator dynamics and saturation limits
+    u_actual = sat(x[12:17], h["max_u"])
+    udot = (ui - u_actual) / h["T_actuator"]
+    delta_r, delta_s, delta_bp, delta_bs = u_actual[0:4]
+    n_p = u_actual[4] / 60 * 2 * np.pi
+    L, rho, mass = h["L"], h["rho"], h["W"] / h["g"]
+    xG, yG, zG = h["xG"], h["yG"], h["zG"]
+    Ix, Iy, Iz, Ixy, Iyz, Ixz = h["Ix"], h["Iy"], h["Iz"], h["Ixy"], h["Iyz"], h["Ixz"]
+    r2, r3, r4, r5 = (0.5 * rho * L**k for k in (2, 3, 4, 5))
+    m = mass / r3
+    M = npsauv_matrices()[0]
+    # control forces and moments (propeller model and control surfaces)
+    Cd0, eps_prop = 0.00385, 1e-10
+    prop = 0.012 * n_p / (u + eps_prop)
+    Xprop = Cd0 * (abs(prop) * prop - 1)
+    Ct = 0.008 * L**2 * abs(prop) * prop / 2
+    Ct1 = 0.008 * L**2 / 2
+    epsilon = -1 + np.sign(n_p) / np.sign(u + eps_prop) * (np.sqrt(Ct + 1) - 1) / (np.sqrt(Ct1 + 1) - 1 + eps_prop)
+    tau1 = (r3 * (h["Xrdr"] * u_r * r * delta_r + (h["Xqds"] * delta_s + h["Xqdb2"] * delta_bp
+                                                    + h["Xqdb2"] * delta_bs) * u_r * q)
+            + r2 * (h["Xvdr"] * u_r * v_r * delta_r + (h["Xwds"] * delta_s + h["Xwdb2"] * delta_bs
+                                                        + h["Xwdb2"] * delta_bp) * u_r * w_r
+                    + (h["Xdsds"] * delta_s**2 + h["Xdrdr"] * delta_r**2) * u_r**2)
+            + r3 * h["Xqdsn"] * u_r * q * delta_s * epsilon
+            + r2 * (h["Xwdsn"] * u_r * w_r * delta_s + h["Xdsdsn"] * u_r**2 * delta_s**2) * epsilon
+            + r2 * u_r**2 * Xprop)
+    tau2 = r2 * h["Ydr"] * u_r**2 * delta_r
+    tau3 = (r2 * u_r**2 * (h["Zds"] * delta_s + h["Zdb2"] * delta_bs + h["Zdb2"] * delta_bp)
+            + r3 * h["Zqn"] * u_r * q * epsilon + r2 * (h["Zwn"] * u_r * w_r + h["Zdsn"] * u_r**2 * delta_s) * epsilon)
+    tau4 = (r4 * h["Kpn"] * u_r * p * epsilon + r3 * u_r**3 * h["Kprop"]
+            + r3 * u_r**2 * (h["Kdb2"] * delta_bp + h["Kdb2"] * delta_bs))
+    tau5 = (r4 * h["Mqn"] * u_r * q * epsilon + r3 * (h["Mwn"] * w_r * u_r + h["Mdsn"] * u_r**2 * delta_s) * epsilon
+            + r3 * u_r**2 * (h["Mds"] * delta_s + h["Mdb2"] * delta_bp + h["Mdb2"] * delta_bs))
+    tau6 = r3 * u_r**2 * h["Nprop"] + r3 * u_r**2 * h["Ndr"] * delta_r
+    tau_control = np.array([tau1, tau2, tau3, tau4, tau5, tau6])
+    # cross-flow drag of a block-shaped body by strip theory (11 stations, as the colon -L/2:L/10:L/2)
+    dxL, eps_d, Hx, Bx = L / 10, 1e-6, 0.53, 0.53
+    xL = np.r_[-L / 2 + np.arange(6) * dxL, L / 2 - np.arange(4, -1, -1) * dxL]
+    Ucf = np.sqrt((v_r + xL * r)**2 + (w_r - xL * q)**2) + eps_d
+    drag = h["Cdy"] * Hx * (v_r + xL * r)**2 + h["Cdz"] * Bx * (w_r - xL * q)**2
+    Cy = np.sum(dxL * drag * (v_r + xL * r) / Ucf)
+    Cz = np.sum(dxL * drag * (w_r - xL * q) / Ucf)
+    Cm = np.sum(dxL * drag * (w_r + cm_sign * xL * q) / Ucf * xL)
+    Cn = np.sum(dxL * drag * (v_r + xL * r) / Ucf * xL)
+    tau_crossflow = (rho / 2) * np.array([0.0, -Cy, -Cz, 0.0, -Cm, -Cn])
+    tau_hydrostatic = -gvect(h["W"], h["B"], theta, phi, np.array([xG, yG, zG]), np.array([h["xB"], h["yB"],
+                                                                                          h["zB"]]))
+    X_h = (r2 * (h["Xvv"] * v_r**2 + h["Xww"] * w_r**2)
+           + r3 * ((m + h["Xvr"]) * v_r * r + (h["Xwq"] - m) * w_r * q + h["Xvp"] * v_r * p)
+           + r4 * ((m * xG / L + h["Xqq"]) * q**2 + (m * xG / L + h["Xrr"]) * r**2 - m * yG / L * p * q
+                   + (h["Xpr"] - m * zG / L) * p * r + h["Xpp"] * p**2))
+    Y_h = (r2 * (h["Yv"] * u_r * v_r + h["Yvw"] * v_r * w_r)
+           + r3 * (h["Yp"] * u_r * p + h["Yr"] * u_r * r + h["Yvq"] * v_r * q + h["Ywp"] * w_r * p
+                   + h["Ywr"] * w_r * r)
+           + r4 * (h["Ypq"] * p * q + h["Yqr"] * q * r)
+           - mass * (u_r * r - w_r * p + xG * p * q - yG * (p**2 + r**2) + zG * q * r))
+    Z_h = (r2 * (h["Zw"] * w_r * u_r + h["Zvv"] * v_r**2)
+           + r3 * (h["Zq"] * u_r * q + h["Zvp"] * v_r * p + h["Zvr"] * v_r * r)
+           + r4 * (h["Zpp"] * p**2 + h["Zpr"] * p * r + h["Zrr"] * r**2)
+           + mass * (v_r * p - u_r * q + xG * p * r + yG * q * r - zG * (p**2 + q**2)))
+    K_h = (r3 * (h["Kv"] * u_r * v_r + h["Kvw"] * v_r * w_r)
+           + r4 * (h["Kp"] * u_r * p + h["Kr"] * u_r * r + h["Kvq"] * v_r * q + h["Kwp"] * w_r * p
+                   + h["Kwr"] * w_r * r)
+           + r5 * (h["Kpq"] * p * q + h["Kqr"] * q * r)
+           + (Iy - Iz) * q * r - Ixy * p * r - (r**2 - q**2) * Iyz + Ixz * p * q
+           - mass * (yG * (v_r * p - u_r * q) - zG * (u_r * r - w_r * p)))
+    M_h = (r3 * (h["Muw"] * u_r * w_r + h["Mvv"] * v_r**2)
+           + r4 * (h["Muq"] * u_r * q + h["Mvp"] * v_r * p + h["Mvr"] * v_r * r)
+           + r5 * (h["Mpp"] * p**2 + h["Mpr"] * p * r + h["Mrr"] * r**2)
+           - (Iz - Ix) * p * r + Ixy * q * r - Iyz * p * q - (p**2 - r**2) * Ixz
+           + mass * (xG * (v_r * p - u_r * q) - zG * (w_r * q - v_r * r)))
+    N_h = (r3 * (h["Nv"] * u_r * v_r + h["Nvw"] * v_r * w_r)
+           + r4 * (h["Np"] * u_r * p + h["Nr"] * u_r * r + h["Nvq"] * v_r * q + h["Nwp"] * w_r * p
+                   + h["Nwr"] * w_r * r)
+           + r5 * (h["Npq"] * p * q + h["Nqr"] * q * r)
+           + (Ix - Iy) * p * q + (p**2 - q**2) * Ixy + Iyz * p * r - Ixz * q * r
+           - mass * (xG * (u_r * r - w_r * p) - yG * (w_r * q - v_r * r)))
+    tau_hydrodynamic = np.array([X_h, Y_h, Z_h, K_h, M_h, N_h])
+    J = eulerang(phi, theta, psi)[0]
+    nu_dot = Dnu_c + np.linalg.solve(M, tau_control + tau_hydrodynamic + tau_crossflow + tau_hydrostatic)
+    xdot = np.r_[nu_dot, J @ x[0:6], udot]
+    return xdot, U, dict(tau_control=tau_control, tau_crossflow=tau_crossflow, epsilon=epsilon, prop=prop)
+
+#------------------------------------------------------------------------------
+
+def npsauv_B_delta(epsilon=None):
+    """2 x 4 input matrix of npsauv() (no arguments in MSS): [tau5; tau6] = u^2 B_delta [dr ds dbp dbs]' + b0.
+    As in npsauv.m with nargin = 0, n_p = 0 and u = 0, epsilon = -1 + 0 = -1 unless another value is passed."""
+    h = NPS
+    r3 = 0.5 * h["rho"] * h["L"]**3
+    eps = -1.0 if epsilon is None else epsilon
+    return np.array([[0.0, r3 * h["Mdsn"] * eps + r3 * h["Mds"], r3 * h["Mdb2"], r3 * h["Mdb2"]],
+                     [r3 * h["Ndr"], 0.0, 0.0, 0.0]])
+
+#------------------------------------------------------------------------------
+
+REMUS_PROP = dict(rho=1026.0, D=0.14, t=0.1, w=0.056, Ja_max=0.6632, KT_0=0.4566, KQ_0=0.0700, KT_max=0.1798,
+                  KQ_max=0.0312, n_max=1525.0)
+
+#------------------------------------------------------------------------------
+
+def remus_propeller(n_rpm, U_r):
+    """Thrust X_prop (N) and torque K_prop (N m) of the REMUS 100 propeller as in remus100.m: linear K_T and K_Q
+    through the B-series points J_a = 0 and J_a = Ja_max (3 blades, P/D = 1, A_E/A_O = 0.718), V_a = 0.944 U_r."""
+    P = REMUS_PROP
+    n = sat(n_rpm, P["n_max"]) / 60.0
+    Va = (1 - P["w"]) * U_r
+    a_T = (P["KT_max"] - P["KT_0"]) / P["Ja_max"]
+    a_Q = (P["KQ_max"] - P["KQ_0"]) / P["Ja_max"]
+    if n > 0:
+        X = P["rho"] * P["D"]**4 * (P["KT_0"] * abs(n) * n + a_T * (Va / P["D"]) * abs(n))
+        K = P["rho"] * P["D"]**5 * (P["KQ_0"] * abs(n) * n + a_Q * (Va / P["D"]) * abs(n))
+    else:
+        X = P["rho"] * P["D"]**4 * P["KT_0"] * abs(n) * n
+        K = P["rho"] * P["D"]**5 * P["KQ_0"] * abs(n) * n
+    return X, K

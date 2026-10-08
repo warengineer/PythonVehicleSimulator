@@ -349,3 +349,10 @@ class OSVAlloc:
         sk = s / self.su
         cost = w1 * u @ u + w2 * sk @ sk + w3 * (a - alpha_old) @ (a - alpha_old) + w4 * (u - u_old) @ (u - u_old)
         return a, u, s, dict(iterations=its, cost=cost, s_lin=x[6:9] * self.su / np.sqrt(w2))
+
+#------------------------------------------------------------------------------
+
+def dls(A, b, lam):
+    """Damped least squares x = A'(A A' + lam I)^-1 b (lam = 0 gives the
+    minimum-norm solution; lam > 0 keeps x bounded near singularities)."""
+    return A.T @ np.linalg.solve(A @ A.T + lam * np.eye(A.shape[0]), b)

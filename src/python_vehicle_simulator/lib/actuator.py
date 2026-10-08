@@ -1,4 +1,5 @@
 import numpy as np
+from .gnc import sat
 
 class fin:
     '''
@@ -195,3 +196,57 @@ class thruster:
         
         return self.u_actual_n
         
+
+#------------------------------------------------------------------------------
+
+def steering_machine(delta, delta_c, d_max, dd_max, T_d=1.0):
+    """Rudder rate (rad/s) of a steering machine with angle and rate
+    limits (Van Amerongen 1982); T_d = 1 s gives container.m."""
+    dc = sat(delta_c, d_max)                 # angle limiter on the command
+    return sat((dc - delta) / T_d, dd_max)   # servo with rate limiter
+
+#------------------------------------------------------------------------------
+
+def rate_limit_step(y, u, rate, h):
+    """Ideal rate limiter, one step of length h: y follows u with
+    |dy/dt| <= rate (an infinitely fast servo with a rate limit)."""
+    return y + sat(u - y, rate * h)
+
+#------------------------------------------------------------------------------
+
+def dc_motor(x, V, Q_load, R_a, L_a, K_m, J_m):
+    """Armature-controlled DC motor, x = [i_a, w] (A, rad/s):
+    L_a di/dt = V - R_a i - K_m w,  J_m dw/dt = K_m i - Q_load."""
+    i_a, w = x
+    return np.array([(V - R_a * i_a - K_m * w) / L_a,
+                     (K_m * i_a - Q_load) / J_m])
+
+#------------------------------------------------------------------------------
+
+def gyrostabilizer(x, tau_w, T_p, P):
+    """Roll and precession of a ship with n gyros (Perez and Steinmann
+    2009), x = [phi, p, alpha, alpha_dot], P = dict of parameters with
+    P["I44"] = I_x + A_44 (rigid-body plus added roll inertia):
+    I44 p_dot + B44 p + C44 phi = tau_w - n K_g a_dot cos(a)
+    I_p a_ddot + B_p a_dot + C_p sin(a) = K_g p cos(a) + T_p."""
+    phi, p, a, ad = x
+    tau_g = -P["n"] * P["Kg"] * ad * np.cos(a)        # gyro roll moment
+    p_dot = (tau_w + tau_g - P["B44"] * p - P["C44"] * phi) / P["I44"]
+    add = (P["Kg"] * p * np.cos(a) + T_p - P["Bp"] * ad
+           - P["Cp"] * np.sin(a)) / P["Ip"]
+    return np.array([p, p_dot, ad, add])
+
+#------------------------------------------------------------------------------
+
+def cmg_pyramid(delta, beta=np.arccos(1 / np.sqrt(3)), h0=1.0):
+    """Angular momentum h (3) and Jacobian A = dh/d(delta) (3 x 4) of
+    four single-gimbal CMGs in a pyramid with skew angle beta."""
+    s, c = np.sin(delta), np.cos(delta)
+    cb, sb = np.cos(beta), np.sin(beta)
+    h = h0 * np.array([-cb * s[0] - c[1] + cb * s[2] + c[3],
+                       c[0] - cb * s[1] - c[2] + cb * s[3],
+                       sb * (s[0] + s[1] + s[2] + s[3])])
+    A = h0 * np.array([[-cb * c[0], s[1], cb * c[2], -s[3]],
+                       [-s[0], -cb * c[1], s[2], cb * c[3]],
+                       [sb * c[0], sb * c[1], sb * c[2], sb * c[3]]])
+    return h, A
