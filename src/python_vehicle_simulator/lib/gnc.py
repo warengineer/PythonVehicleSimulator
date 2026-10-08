@@ -180,26 +180,24 @@ def m2c(M, nu):
 
 #------------------------------------------------------------------------------
 
+# Hoerner's curve [B/2T, C_D], the digitized data of MSS Hoerner.m (Leite et al. 1998)
+HOERNER = np.array([
+    [0.0108623, 1.96608], [0.176606, 1.96573], [0.353025, 1.89756], [0.451863, 1.78718], [0.472838, 1.58374],
+    [0.492877, 1.27862], [0.493252, 1.21082], [0.558473, 1.08356], [0.646401, 0.998631], [0.833589, 0.87959],
+    [0.988002, 0.828415], [1.30807, 0.759941], [1.63918, 0.691442], [1.85998, 0.657076], [2.31288, 0.630693],
+    [2.59998, 0.596186], [3.00877, 0.586846], [3.45075, 0.585909], [3.7379, 0.559877], [4.00309, 0.559315]])
+
 def Hoerner(B,T):
     """
     CY_2D = Hoerner(B,T)
-    Hoerner computes the 2D Hoerner cross-flow form coeff. as a function of beam 
-    B and draft T.The data is digitized and interpolation is used to compute 
-    other data point than those in the table
+    Hoerner computes the 2D Hoerner cross-flow form coeff. as a function of beam
+    B and draft T.The data is digitized and interpolation is used to compute
+    other data point than those in the table. Same data as MSS Hoerner.m; a ratio
+    B/(2T) outside the table gets the value at the nearest end.
     """
-    
-    # DATA = [B/2T  C_D]
-    DATA1 = np.array([
-        0.0109,0.1766,0.3530,0.4519,0.4728,0.4929,0.4933,0.5585,0.6464,0.8336,
-        0.9880,1.3081,1.6392,1.8600,2.3129,2.6000,3.0088,3.4508, 3.7379,4.0031 
-        ])
-    DATA2 = np.array([
-        1.9661,1.9657,1.8976,1.7872,1.5837,1.2786,1.2108,1.0836,0.9986,0.8796,
-        0.8284,0.7599,0.6914,0.6571,0.6307,0.5962,0.5868,0.5859,0.5599,0.5593 
-        ])
 
-    CY_2D = np.interp( B / (2 * T), DATA1, DATA2 )
-        
+    CY_2D = np.interp( B / (2 * T), HOERNER[:,0], HOERNER[:,1] )
+
     return CY_2D
 
 #------------------------------------------------------------------------------
