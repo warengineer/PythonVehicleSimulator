@@ -451,3 +451,13 @@ def expq(w, h):
     if nw < 1e-300:
         return np.eye(4)
     return math.cos(a) * np.eye(4) + (math.sin(a) / nw) * T2
+
+#------------------------------------------------------------------------------
+
+def satlim(x, x_min, x_max):
+    """Asymmetric saturation x_min <= x <= x_max (MSS satlim.m)."""
+    if np.any(np.asarray(x_min) >= np.asarray(x_max)):
+        raise ValueError("Each element of x_min must be strictly smaller than the element of x_max.")
+    if np.isscalar(x) and np.isscalar(x_min) and np.isscalar(x_max):
+        return min(max(x, x_min), x_max)
+    return np.minimum(np.maximum(x, x_min), x_max)

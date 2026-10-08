@@ -234,3 +234,64 @@ def freqresp(A, B, C, D, w):
     B = np.asarray(B, float).reshape(n)
     C = np.asarray(C, float).reshape(n)
     return np.array([C @ np.linalg.solve(1j * wk * np.eye(n) - A, B) + D for wk in np.atleast_1d(w)])
+
+#------------------------------------------------------------------------------
+
+def _hermite_eval(x, y, s, xi):
+    """Piecewise cubic Hermite interpolant with knot values y, slopes s."""
+    h, d = np.diff(x), np.diff(y) / np.diff(x)
+    k = np.clip(np.searchsorted(x, xi, side="right") - 1, 0, len(h) - 1)
+    u = xi - x[k]
+    c2 = (3 * d[k] - 2 * s[k] - s[k + 1]) / h[k]
+    c3 = (s[k] - 2 * d[k] + s[k + 1]) / h[k]**2
+    return y[k] + u * (s[k] + u * (c2 + u * c3))
+
+#------------------------------------------------------------------------------
+
+def pchip(x, y, xi):
+    """Shape-preserving piecewise cubic Hermite interpolation
+    (Fritsch-Carlson), the method of MATLAB/Octave pchip: interior slopes are
+    weighted harmonic means, end slopes a shape-preserving three-point formula."""
+    x, y, xi = (np.asarray(a, float) for a in (x, y, xi))
+    h, d = np.diff(x), np.diff(y) / np.diff(x)
+    s = np.zeros_like(y)
+    w1, w2 = 2 * h[1:] + h[:-1], h[1:] + 2 * h[:-1]
+    ok = d[:-1] * d[1:] > 0
+    s[1:-1][ok] = (w1 + w2)[ok] / (w1[ok] / d[:-1][ok] + w2[ok] / d[1:][ok])
+
+    def end_slope(h0, h1, d0, d1):
+        e = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1)
+        if np.sign(e) != np.sign(d0):
+            return 0.0
+        if np.sign(d0) != np.sign(d1) and abs(e) > abs(3 * d0):
+            return 3 * d0
+        return e
+    s[0] = end_slope(h[0], h[1], d[0], d[1])
+    s[-1] = end_slope(h[-1], h[-2], d[-1], d[-2])
+    return _hermite_eval(x, y, s, xi)
+
+#------------------------------------------------------------------------------
+
+def spline_nak(x, y, xi):
+    """Cubic spline with not-a-knot end conditions, as
+    MATLAB/Octave spline(x, y, xi) when y has as many values as x (at least 4
+    points). The knot slopes solve C2 continuity at the interior knots and a
+    continuous third derivative at the second and the second-last knot."""
+    x, y, xi = (np.asarray(a, float) for a in (x, y, xi))
+    n = len(x)
+    if n < 4:
+        raise ValueError("spline_nak needs at least 4 points")
+    h, d = np.diff(x), np.diff(y) / np.diff(x)
+    A, b = np.zeros((n, n)), np.zeros(n)
+    for i in range(1, n - 1):                         # C2 continuity at x_i
+        A[i, i - 1:i + 2] = [1 / h[i - 1], 2 * (1 / h[i - 1] + 1 / h[i]),
+                             1 / h[i]]
+        b[i] = 3 * (d[i - 1] / h[i - 1] + d[i] / h[i])
+    A[0, 0:3] = [1 / h[0]**2, 1 / h[0]**2 - 1 / h[1]**2,     # not-a-knot
+                 -1 / h[1]**2]                                # at x_1
+    b[0] = 2 * (d[0] / h[0]**2 - d[1] / h[1]**2)
+    A[-1, -3:] = [1 / h[-2]**2, 1 / h[-2]**2 - 1 / h[-1]**2,  # not-a-knot
+                  -1 / h[-1]**2]                              # at x_{n-2}
+    b[-1] = 2 * (d[-2] / h[-2]**2 - d[-1] / h[-1]**2)
+    s = np.linalg.solve(A, b)
+    return _hermite_eval(x, y, s, xi)

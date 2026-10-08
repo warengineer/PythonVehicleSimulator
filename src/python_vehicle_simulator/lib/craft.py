@@ -15,6 +15,8 @@ from .gnc import D2R, G_MSS, Rz, crossFlowDrag, eulerang, forceLiftDrag, gRvect,
 from .ins import gravity
 from .models import Dmtrx, imlay61, spheroid
 from .numerics import interp1_extrap
+from .gnc import Hmtrx, Hoerner, Rzyx, Smtrx, m2c, satlim
+from .models import addedMassSurge
 
 
 #------------------------------------------------------------------------------
@@ -484,3 +486,158 @@ SEMISUB = dict(
                         [0, -0.0002, 0, -0.0034, 0, 0.8656]]),
     G=1.0e10 * np.diag([0, 0, 0.0006, 1.4296, 2.6212, 0]))
 SEMISUB["M"] = SEMISUB["MRB"] + SEMISUB["MA"]
+
+#------------------------------------------------------------------------------
+
+OTTER = dict(g=9.81, rho=1025.0, L=2.0, B=1.08, m=55.0, rg=np.array([0.2, 0.0, -0.2]), T_sway=1.0, T_yaw=1.0,
+             Umax=6 * 0.5144, B_pont=0.25, y_pont=0.395, Cw_pont=0.75, Cb_pont=0.4,
+             k_pos=0.02216 / 2, k_neg=0.01289 / 2)
+
+#------------------------------------------------------------------------------
+
+def _otter_constants(mp, rp):
+    """The parts of otter.m that do not depend on the state (mass, restoring and damping matrices)."""
+    P = OTTER
+    rp = np.asarray(rp, float)
+    g, rho, L, B, m = P["g"], P["rho"], P["L"], P["B"], P["m"]
+    R44, R55, R66 = 0.4 * B, 0.25 * L, 0.25 * L
+    B_pont, y_pont, Cw_pont, Cb_pont = P["B_pont"], P["y_pont"], P["Cw_pont"], P["Cb_pont"]
+    nabla = (m + mp) / rho
+    T = nabla / (2 * Cb_pont * B_pont * L)                       # draft
+    rg_total = (m * P["rg"] + mp * rp) / (m + mp)
+    r_hull, r_pay = P["rg"] - rg_total, rp - rg_total
+    Ig = m * np.diag([R44**2, R55**2, R66**2]) - m * Smtrx(r_hull) @ Smtrx(r_hull) - mp * Smtrx(r_pay) @ Smtrx(r_pay)
+    I3, O3 = np.eye(3), np.zeros((3, 3))
+    H = Hmtrx(rg_total)
+    MRB = H.T @ np.block([[(m + mp) * I3, O3], [O3, Ig]]) @ H
+    MA = np.diag([addedMassSurge(m, L, rho), 1.5 * m, 1.0 * m, 0.2 * Ig[0, 0], 0.8 * Ig[1, 1], 1.7 * Ig[2, 2]])
+    M = MRB + MA
+    Aw_pont = Cw_pont * L * B_pont                               # waterline area, one pontoon
+    I_T = (2 * (1 / 12) * L * B_pont**3 * (6 * Cw_pont**3 / ((1 + Cw_pont) * (1 + 2 * Cw_pont)))
+           + 2 * Aw_pont * y_pont**2)
+    I_L = 0.8 * 2 * (1 / 12) * B_pont * L**3
+    KB = (1 / 3) * (5 * T / 2 - 0.5 * nabla / Aw_pont)           # otter.m revision 2026-10-07
+    KG = T - rg_total[2]
+    GM_T, GM_L = KB + I_T / nabla - KG, KB + I_L / nabla - KG
+    G_CF = np.diag([0.0, 0.0, rho * g * 2 * Aw_pont, rho * g * nabla * GM_T, rho * g * nabla * GM_L, 0.0])
+    Hc = Hmtrx(np.array([-0.2, 0.0, 0.0]))                       # LCF = -0.2 m
+    G = Hc.T @ G_CF @ Hc
+    w3, w4, w5 = (np.sqrt(G_CF[i, i] / M[i, i]) for i in (2, 3, 4))
+    Xu = -24.4 * g / P["Umax"]
+    Yv, Zw = -M[1, 1] / P["T_sway"], -2 * 0.3 * w3 * M[2, 2]
+    Kp, Mq, Nr = -2 * 0.2 * w4 * M[3, 3], -2 * 0.4 * w5 * M[4, 4], -M[5, 5] / P["T_yaw"]
+    k_pos, k_neg = P["k_pos"], P["k_neg"]
+    n_max = math.sqrt((0.5 * 24.4 * g) / k_pos)
+    n_min = -math.sqrt((0.5 * 13.6 * g) / k_neg)
+    return dict(T=T, nabla=nabla, rg=rg_total, Ig=Ig, MRB=MRB, MA=MA, M=M, G=G, G_CF=G_CF, KB=KB, GM_T=GM_T,
+                GM_L=GM_L, Xu=Xu, Yv=Yv, Zw=Zw, Kp=Kp, Mq=Mq, Nr=Nr, n_min=n_min, n_max=n_max,
+                Cd=Hoerner(P["B_pont"], T), mp=mp, rp=rp)
+
+#------------------------------------------------------------------------------
+
+def otter_thrust(n, n_min, n_max):
+    """Propeller thrusts of otter.m: n saturated, k_pos n|n| for n > 0 and k_neg n|n| otherwise."""
+    n = satlim(np.asarray(n, float), n_min, n_max)
+    k_pos, k_neg = OTTER["k_pos"], OTTER["k_neg"]
+    return np.where(n > 0, k_pos * n * np.abs(n), k_neg * n * np.abs(n))
+
+#------------------------------------------------------------------------------
+
+def otter(x, n, mp=25.0, rp=(0.0, 0.0, 0.0), V_c=0.0, beta_c=0.0):
+    """The Otter USV of MSS otter.m written out line by line (without its checks of the lengths of x and n):
+    x = [u v w p q r  x y z  phi theta psi], n = propeller speeds (rad/s), payload mp (kg) at rp (m),
+    current speed V_c (m/s) towards beta_c (rad). Returns xdot and U."""
+    P = OTTER
+    c = _otter_constants(mp, rp)
+    x = np.asarray(x, float)
+    nu, nu2, eta = x[0:6], x[3:6], x[6:12]
+    U = math.sqrt(nu[0]**2 + nu[1]**2 + nu[2]**2)
+    nu_c = np.array([V_c * np.cos(beta_c - eta[5]), V_c * np.sin(beta_c - eta[5]), 0.0, 0.0, 0.0, 0.0])
+    nu_r = nu - nu_c
+    nu_c_dot = np.r_[-Smtrx(nu2) @ nu_c[0:3], np.zeros(3)]
+    m = P["m"]
+    O3 = np.zeros((3, 3))
+    H = Hmtrx(c["rg"])
+    CRB = H.T @ np.block([[(m + mp) * Smtrx(nu2), O3], [O3, -Smtrx(c["Ig"] @ nu2)]]) @ H
+    CA = m2c(c["MA"], nu_r)
+    Th = otter_thrust(n, c["n_min"], c["n_max"])
+    y_pont = P["y_pont"]
+    tau = np.array([Th[0] + Th[1], 0.0, 0.0, 0.0, 0.0, y_pont * Th[0] - y_pont * Th[1]])
+    tau_damp = np.array([c["Xu"] * nu_r[0], c["Yv"] * nu_r[1], c["Zw"] * nu_r[2], c["Kp"] * nu_r[3],
+                         c["Mq"] * nu_r[4], c["Nr"] * (1 + 10 * abs(nu_r[5])) * nu_r[5]])
+    tau_cf = crossFlowDrag(P["L"], P["B_pont"], c["T"], nu_r)
+    f_pay = Rzyx(eta[3], eta[4], eta[5]).T @ np.array([0.0, 0.0, mp * P["g"]])
+    g_0 = np.r_[f_pay, Smtrx(np.asarray(rp, float)) @ f_pay]
+    G = c["G"]
+    eta_0 = np.r_[0.0, 0.0, np.linalg.inv(G[2:5, 2:5]) @ g_0[2:5], 0.0]
+    e = eta - eta_0                                              # shifted equilibrium
+    J = eulerang(e[3], e[4], e[5])[0]
+    nudot = nu_c_dot + np.linalg.solve(c["M"], tau + tau_damp + tau_cf - (CRB + CA) @ nu_r - G @ e)
+    return np.r_[nudot, J @ nu], U
+
+#------------------------------------------------------------------------------
+
+def otter_matrices(mp=25.0, rp=(0.0, 0.0, 0.0)):
+    """[~, ~, M, B_prop, n_min, n_max] = otter() of MSS: M at the default payload (mp = 25 kg, rp = 0 when otter is
+    called without arguments), B_prop = k_pos [1 1; y_pont -y_pont] and the propeller-speed limits (rad/s)."""
+    c = _otter_constants(mp, rp)
+    B_prop = OTTER["k_pos"] * np.array([[1.0, 1.0], [OTTER["y_pont"], -OTTER["y_pont"]]])
+    return c["M"], B_prop, c["n_min"], c["n_max"]
+
+#------------------------------------------------------------------------------
+
+class Otter:
+    """otter.m with the state-independent matrices computed once for a given payload (mp, rp). The call
+    Otter(mp, rp)(x, n, V_c, beta_c) returns the same xdot as otter(x, n, mp, rp, V_c, beta_c) (check item 1)."""
+
+    def __init__(self, mp=25.0, rp=(0.0, 0.0, 0.0)):
+        c = _otter_constants(mp, rp)
+        self.c = c
+        self.Minv = np.linalg.inv(c["M"])
+        self.H = Hmtrx(c["rg"])
+        self.G = c["G"]
+        self.G35inv = np.linalg.inv(c["G"][2:5, 2:5])
+        self.Sr = Smtrx(np.asarray(rp, float))
+        self.mtot = OTTER["m"] + mp
+        self.mp = mp
+        L, T = OTTER["L"], c["T"]
+        dx = L / STRIPS
+        self.xs = -L / 2 + (np.arange(1, STRIPS + 1) - 0.5) * dx
+        self.kcf = -0.5 * 1025.0 * T * c["Cd"] * dx
+        self.dmp = np.array([c["Xu"], c["Yv"], c["Zw"], c["Kp"], c["Mq"], c["Nr"]])
+        self.MA = c["MA"]
+
+    def __call__(self, x, n, V_c=0.0, beta_c=0.0):
+        c = self.c
+        nu, nu2, eta = x[0:6], x[3:6], x[6:12]
+        cb, sb = math.cos(beta_c - eta[5]), math.sin(beta_c - eta[5])
+        nu_c = np.array([V_c * cb, V_c * sb, 0.0, 0.0, 0.0, 0.0])
+        nu_r = nu - nu_c
+        p, q, r = nu2
+        uc, vc = nu_c[0], nu_c[1]
+        nu_c_dot = np.array([r * vc, -r * uc, q * uc - p * vc, 0.0, 0.0, 0.0])     # -S(nu2) nu_c(1:3)
+        O3 = np.zeros((3, 3))
+        CRB = self.H.T @ np.block([[self.mtot * Smtrx(nu2), O3], [O3, -Smtrx(c["Ig"] @ nu2)]]) @ self.H
+        CA = m2c(self.MA, nu_r)
+        Th = otter_thrust(n, c["n_min"], c["n_max"])
+        yp = OTTER["y_pont"]
+        tau = np.array([Th[0] + Th[1], 0.0, 0.0, 0.0, 0.0, yp * Th[0] - yp * Th[1]])
+        tau_damp = self.dmp * nu_r
+        tau_damp[5] *= 1 + 10 * abs(nu_r[5])
+        xs = self.xs
+        vh = nu_r[1] + xs * nu_r[5]
+        vv = nu_r[2] + xs * nu_r[4]
+        Uh, Uv = np.abs(vh) * vh, np.abs(vv) * vv
+        k = self.kcf
+        tau_cf = np.array([0.0, k * Uh.sum(), k * Uv.sum(), 0.0, k * (xs * Uv).sum(), k * (xs * Uh).sum()])
+        f_pay = Rzyx(eta[3], eta[4], eta[5]).T @ np.array([0.0, 0.0, self.mp * OTTER["g"]])
+        g_0 = np.r_[f_pay, self.Sr @ f_pay]
+        e = eta.copy()
+        e[2:5] -= self.G35inv @ g_0[2:5]                           # shifted equilibrium eta - eta_0
+        J = eulerang(e[3], e[4], e[5])[0]
+        nudot = nu_c_dot + self.Minv @ (tau + tau_damp + tau_cf - (CRB + CA) @ nu_r - self.G @ e)
+        return np.r_[nudot, J @ nu]
+
+#------------------------------------------------------------------------------
+
+STRIPS = 20

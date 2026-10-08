@@ -218,3 +218,9 @@ def Dmtrx(T_126, zeta_45, MRB, MA, hydrostatics):
     w3, w4, w5 = (np.sqrt(hs[i, i] / M[i, i]) for i in (2, 3, 4))
     return np.diag([M[0, 0] / T1, M[1, 1] / T2, M[2, 2] * 2 * 0.2 * w3,
                     M[3, 3] * 2 * zeta4 * w4, M[4, 4] * 2 * zeta5 * w5, M[5, 5] / T6])
+
+#------------------------------------------------------------------------------
+
+def addedMassSurge(m, L, rho=1025.0):
+    """Added mass in surge, A11 = -Xudot = 2.7 rho nabla^(5/3) / L^2 (Soding 1982; MSS addedMassSurge.m)."""
+    return 2.7 * rho * (m / rho)**(5.0 / 3.0) / L**2
