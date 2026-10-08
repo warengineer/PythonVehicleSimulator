@@ -283,7 +283,7 @@ SIMOSV = dict(K_max=np.diag([300e3, 300e3, 655e3, 655e3]), n_max=np.array([140.0
 #------------------------------------------------------------------------------
 
 class OSVAlloc:
-    """The criterion of optimalAlloc in SIMosv.m (solved there by fmincon/SQP to convergence, MATLAB only),
+    """The criterion of optimalAlloc in SIMosv.m (solved there by fmincon/SQP, MATLAB Optimization Toolbox),
         min  w1 |u|^2 + w2 |s|^2 + w3 |alpha - alpha_old|^2 + w4 |u - u_old|^2
         s.t. T(alpha) K u - tau + s = 0,  -az_max <= alpha <= az_max,  -1 <= u <= 1,
              |alpha - alpha_old| <= 0.3 h,  |u - u_old| <= 0.1 h       (rates 0.3 rad/s and 0.1 per second),
@@ -293,11 +293,14 @@ class OSVAlloc:
     constraint is linearized at the previous solution, T(alpha) K u ~ T(alpha_old) K u
     + d(T(alpha) K u_old)/dalpha (alpha - alpha_old), which is linear in (alpha, u). qp_box_eq solves it in
     x = [alpha, u, z], z = sqrt(w2) s/s_unit (the slack scaled to kN and by the square root of its weight).
+    sqp_iterations > 1 linearizes again at the new solution and solves again (sequential QP) until the step is below
+    sqp_tol: the result is then a local minimizer of the nonlinear criterion within the rate box of the sample.
     Returns alpha, u, the slack s = tau - T(alpha) K u (N) of the true model, and info."""
 
-    def __init__(self, data=SIMOSV, s_unit=1e3):
+    def __init__(self, data=SIMOSV, s_unit=1e3, sqp_iterations=1, sqp_tol=1e-12):
         self.d = data
         self.w = data["w"]
+        self.sqp_iterations, self.sqp_tol = sqp_iterations, sqp_tol
         self.K = np.asarray(data["K_max"], float)
         self.k = np.diag(self.K)
         self.su = s_unit
@@ -338,17 +341,23 @@ class OSVAlloc:
         w1, w2, w3, w4 = self.w
         lo, hi = self.bounds(alpha_old, u_old, h)
         xa = np.clip(np.r_[alpha_old, u_old], lo, hi)
-        H, g, A, b, TK, Ja = self.local_qp(tau, alpha_old, u_old, xa[0:2], xa[2:6])
-        z0 = np.sqrt(w2) * (tau - TK @ xa[2:6]) / self.su        # makes x0 = [xa, z0] feasible
         lb = np.r_[lo, -np.inf * np.ones(3)]
         ub = np.r_[hi, np.inf * np.ones(3)]
-        x, info = qp_box_eq(H, g, A, b, lb, ub, np.r_[xa, z0], tol=1e-13)
-        its = info["iterations"]
+        its = 0
+        for k in range(self.sqp_iterations):                     # linearized at xa (the previous solution first)
+            H, g, A, b, TK, Ja = self.local_qp(tau, alpha_old, u_old, xa[0:2], xa[2:6])
+            z0 = np.sqrt(w2) * (tau - TK @ xa[2:6]) / self.su    # makes x0 = [xa, z0] feasible
+            x, info = qp_box_eq(H, g, A, b, lb, ub, np.r_[xa, z0], tol=1e-13)
+            its += info["iterations"]
+            step = np.max(np.abs(x[0:6] - xa))
+            xa = x[0:6]
+            if step < self.sqp_tol:
+                break
         a, u = x[0:2], x[2:6]
         s = tau - self.T(a) @ self.K @ u
         sk = s / self.su
         cost = w1 * u @ u + w2 * sk @ sk + w3 * (a - alpha_old) @ (a - alpha_old) + w4 * (u - u_old) @ (u - u_old)
-        return a, u, s, dict(iterations=its, cost=cost, s_lin=x[6:9] * self.su / np.sqrt(w2))
+        return a, u, s, dict(iterations=its, sqp_iterations=k + 1, cost=cost, s_lin=x[6:9] * self.su / np.sqrt(w2))
 
 #------------------------------------------------------------------------------
 
