@@ -25,16 +25,19 @@ def ssa(angle):
 
 #------------------------------------------------------------------------------
 
-def sat(x, x_min, x_max):
+def sat(x, x_min, x_max=None):
     """
     x = sat(x,x_min,x_max) saturates a signal x such that x_min <= x <= x_max
+    x = sat(x,x_max) saturates symmetrically, -x_max <= x <= x_max (MSS sat.m)
+    x can be a scalar or an array (element by element).
     """
-    if x > x_max:
-        x = x_max 
-    elif x < x_min:
-        x = x_min
-        
-    return x    
+    if x_max is None:
+        x_max = x_min
+        if np.any(np.asarray(x_max) <= 0):
+            raise ValueError("x_max must contain positive elements")
+        x_min = -x_max
+
+    return np.minimum(np.maximum(x, x_min), x_max)
 
 #------------------------------------------------------------------------------
 
