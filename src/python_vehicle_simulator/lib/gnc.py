@@ -12,6 +12,7 @@ Author:     Thor I. Fossen
 
 import numpy as np
 import math
+from .numerics import vnorm
 
 #------------------------------------------------------------------------------
 
@@ -395,3 +396,58 @@ def S3(r):
 #------------------------------------------------------------------------------
 
 G_MSS = 9.81      # acceleration of gravity of the MSS ship models (m/s^2)
+
+#------------------------------------------------------------------------------
+
+def quatprod(q1, q2):
+    """Quaternion (Hamilton) product q1 x q2 for scalar-first quaternions (MSS quatprod.m)."""
+    eta1, eps1 = q1[0], np.asarray(q1[1:4], float)
+    eta2, eps2 = q2[0], np.asarray(q2[1:4], float)
+    return np.concatenate(([eta1 * eta2 - eps1 @ eps2], eta2 * eps1 + eta1 * eps2 + np.cross(eps1, eps2)))
+
+#------------------------------------------------------------------------------
+
+def euler2q(phi, theta, psi):
+    """Unit quaternion from Euler angles (MSS euler2q.m; like the m-file it divides by q'q, which is 1)."""
+    cy, sy = math.cos(psi * 0.5), math.sin(psi * 0.5)
+    cp, sp = math.cos(theta * 0.5), math.sin(theta * 0.5)
+    cr, sr = math.cos(phi * 0.5), math.sin(phi * 0.5)
+    q = np.array([cy * cp * cr + sy * sp * sr,
+                  cy * cp * sr - sy * sp * cr,
+                  sy * cp * sr + cy * sp * cr,
+                  sy * cp * cr - cy * sp * sr])
+    return q / (q @ q)
+
+#------------------------------------------------------------------------------
+
+def q2euler(q):
+    """Euler angles (phi, theta, psi) from a unit quaternion (MSS q2euler.m)."""
+    q = np.asarray(q, float)
+    q = q / vnorm(q)
+    R = Rquat(q)
+    phi = math.atan2(R[2, 1], R[2, 2])
+    r31 = R[2, 0]
+    if abs(r31) > 1:
+        r31 = math.copysign(1.0, r31)
+    theta = -math.asin(r31)
+    psi = math.atan2(R[1, 0], R[0, 0])
+    return phi, theta, psi
+
+#------------------------------------------------------------------------------
+
+def R2euler(R):
+    """Euler angles from a rotation matrix (MSS R2euler.m)."""
+    return math.atan2(R[2, 1], R[2, 2]), -math.asin(R[2, 0]), math.atan2(R[1, 0], R[0, 0])
+
+#------------------------------------------------------------------------------
+
+def expq(w, h):
+    """exp(Tquat(w) h) in closed form, cos(a) I + sin(a)/|w| (2 Tquat(w)) with a = |w| h/2
+    (the exponential map used by quatObserver.m, quatMEKF.m and ins_mekf.m)."""
+    w = np.asarray(w, float)
+    nw = math.sqrt(w @ w)
+    a = 0.5 * nw * h
+    T2 = 2.0 * Tquat(w)
+    if nw < 1e-300:
+        return np.eye(4)
+    return math.cos(a) * np.eye(4) + (math.sin(a) / nw) * T2

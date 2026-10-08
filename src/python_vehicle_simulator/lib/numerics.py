@@ -192,3 +192,27 @@ def invQR(A):
         raise ValueError("The matrix is near-singular and not invertible.")
     Q, R = np.linalg.qr(A)
     return np.linalg.solve(R, Q.T)
+
+#------------------------------------------------------------------------------
+
+def vnorm(v):
+    """Euclidean norm of a vector, sqrt(v'v) (as np.linalg.norm for a vector, without its overhead)."""
+    return math.sqrt(float(v @ v))
+
+#------------------------------------------------------------------------------
+
+def expm_taylor(A):
+    """Matrix exponential as in MSS expm_taylor.m: Taylor terms A^k/k! are added until the infinity norm of the last
+    added term is at most 1e-6 (the m-file's stopping rule)."""
+    A = np.asarray(A, float)
+    n = A.shape[0]
+    E = np.eye(n)
+    term = np.eye(n)
+    Ak = np.eye(n)
+    k = 1
+    while np.linalg.norm(term, np.inf) > 1e-6:
+        Ak = Ak @ A
+        term = Ak / math.factorial(k)
+        E = E + term
+        k += 1
+    return E
