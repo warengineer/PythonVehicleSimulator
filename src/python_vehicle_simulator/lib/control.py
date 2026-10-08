@@ -13,6 +13,8 @@ Author:     Thor I. Fossen
 import numpy as np
 from python_vehicle_simulator.lib.guidance import refModel3
 from python_vehicle_simulator.lib.gnc import ssa, Rzyx
+from .gnc import Rz
+from .numerics import lqr
 
 # SISO PID pole placement
 def PIDpolePlacement(
@@ -127,6 +129,62 @@ def integralSMC(
 
     return delta, e_int, x_d, v_d, a_d
 
+#------------------------------------------------------------------------------
 
+def lqtracker(A, B, C, Q, R):
+    """LQ tracker of MSS lqtracker.m: u = G1 x + G2 y_d with G1 = -R^-1 B' P and
+    G2 = -R^-1 B' ((A + B G1)')^-1 C' Q (P from lqr(A, B, C' Q C, R))."""
+    A = np.atleast_2d(np.asarray(A, float))
+    B = np.asarray(B, float).reshape(A.shape[0], -1)
+    C = np.atleast_2d(np.asarray(C, float))
+    Q, R = np.atleast_2d(np.asarray(Q, float)), np.atleast_2d(np.asarray(R, float))
+    _, P, _ = lqr(A, B, C.T @ Q @ C, R)
+    G1 = -np.linalg.inv(R) @ B.T @ P
+    G2 = -np.linalg.inv(R) @ B.T @ np.linalg.inv((A + B @ G1).T) @ C.T @ Q
+    return G1, G2
 
+#------------------------------------------------------------------------------
 
+class IntegralSMCheading:
+    """MSS integralSMCheading.m (the persistent integral state as an attribute): sigma = r - r_r with
+    r_r = r_d - 2 lam ssa(psi - psi_d) - lam^2 psi_int, delta = (T r_r' + r_r - K_d sigma - K_sigma sat(sigma/phi_b))/K
+    (sat as sgn outside the boundary layer); psi_int is propagated by Euler after delta is computed."""
+
+    def __init__(self):
+        self.psi_int = 0.0
+
+    def __call__(self, psi, r, psi_d, r_d, a_d, K_d, K_sigma, lam, phi_b, K_nomoto, T_nomoto, h):
+        e_psi = ssa(psi - psi_d)
+        e_r = r - r_d
+        r_r_dot = a_d - 2 * lam * e_r - lam**2 * e_psi
+        r_r = r_d - 2 * lam * e_psi - lam**2 * self.psi_int
+        sigma = r - r_r
+        if abs(sigma / phi_b) > 1:
+            delta = (T_nomoto * r_r_dot + r_r - K_d * sigma - K_sigma * np.sign(sigma)) / K_nomoto
+        else:
+            delta = (T_nomoto * r_r_dot + r_r - K_d * sigma - K_sigma * (sigma / phi_b)) / K_nomoto
+        self.psi_int = self.psi_int + h * e_psi
+        return delta
+
+#------------------------------------------------------------------------------
+
+class PIDnonlinearMIMO:
+    """Nonlinear MIMO PID for DP (MSS PIDnonlinearMIMO.m; persistent eta_d and z_int as attributes):
+    tau = -R(psi)' (Kp e + Ki z_int) - Kd nu, e = eta - eta_d (ssa in yaw), Kp = M_diag wn^2, Kd = 2 M_diag zeta wn,
+    Ki = Kp wn/10; z_int and the setpoint filter eta_d (time constant T_f) are updated by Euler after tau."""
+
+    def __init__(self):
+        self.z_int, self.eta_d = np.zeros(3), np.zeros(3)
+
+    def __call__(self, eta, nu, eta_ref, M, wn, zeta, T_f, h):
+        eta, nu, eta_ref, M = (np.asarray(v, float) for v in (eta, nu, eta_ref, M))
+        Md = np.diag(np.diag(M))
+        Kp = Md * wn * wn
+        Kd = Md * 2 * zeta * wn
+        Ki = 0.1 * Kp * wn
+        e = eta - self.eta_d
+        e[2] = ssa(e[2])
+        tau = -Rz(eta[2]).T @ (Kp @ e + Ki @ self.z_int) - Kd @ nu
+        self.z_int = self.z_int + h * (eta - self.eta_d)
+        self.eta_d = self.eta_d + h * (eta_ref - self.eta_d) / T_f
+        return tau

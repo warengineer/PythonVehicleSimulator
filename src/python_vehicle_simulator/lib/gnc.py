@@ -320,4 +320,78 @@ def gvect(W,B,theta,phi,r_bg,r_bb):
     
     return g
 
+#------------------------------------------------------------------------------
 
+D2R = np.pi / 180.0      # degrees to radians (MSS conversion.m)
+
+#------------------------------------------------------------------------------
+
+def eulerang(phi, theta, psi):
+    """J = blockdiag(Rzyx, Tzyx) and the two blocks (MSS eulerang.m)."""
+    R, T = Rzyx(phi, theta, psi), Tzyx(phi, theta)
+    J = np.zeros((6, 6))
+    J[0:3, 0:3], J[3:6, 3:6] = R, T
+    return J, R, T
+
+#------------------------------------------------------------------------------
+
+def Rquat(q):
+    """Rotation matrix of the unit quaternion q = [eta, eps1, eps2, eps3] (MSS Rquat.m)."""
+    q = np.asarray(q, float)
+    if abs(np.linalg.norm(q) - 1) > 1e-6:
+        raise ValueError("norm(q) must be equal to 1")
+    S = Smtrx(q[1:4])
+    return np.eye(3) + 2 * q[0] * S + 2 * S @ S
+
+#------------------------------------------------------------------------------
+
+def Tquat(u):
+    """4 x 3 matrix Tq with q_dot = Tq(q) w for a quaternion u = q, or the 4 x 4 matrix Tw with q_dot = Tw(w) q for
+    an angular velocity u = w (MSS Tquat.m)."""
+    u = np.asarray(u, float)
+    if len(u) == 4:
+        eta, e1, e2, e3 = u
+        return 0.5 * np.array([[-e1, -e2, -e3], [eta, -e3, e2], [e3, eta, -e1], [-e2, e1, eta]])
+    w = u[0:3]
+    T = np.zeros((4, 4))
+    T[0, 1:4] = -w
+    T[1:4, 0] = w
+    T[1:4, 1:4] = -Smtrx(w)
+    return 0.5 * T
+
+#------------------------------------------------------------------------------
+
+def quatern(q):
+    """J = blockdiag(Rquat, Tquat) of size 7 x 6 and the two blocks (MSS quatern.m)."""
+    R, T = Rquat(q), Tquat(q)
+    J = np.zeros((7, 6))
+    J[0:3, 0:3], J[3:7, 3:6] = R, T
+    return J, R, T
+
+#------------------------------------------------------------------------------
+
+def gRvect(W, B, R, r_bG, r_bB):
+    """Restoring forces of a submerged body from the rotation matrix R (Euler angles or quaternion) (MSS gRvect.m)."""
+    xg, yg, zg = r_bG
+    xb, yb, zb = r_bB
+    return np.array([-(W - B) * R[2, 0], -(W - B) * R[2, 1], -(W - B) * R[2, 2],
+                     -(yg * W - yb * B) * R[2, 2] + (zg * W - zb * B) * R[2, 1],
+                     -(zg * W - zb * B) * R[2, 0] + (xg * W - xb * B) * R[2, 2],
+                     -(xg * W - xb * B) * R[2, 1] + (yg * W - yb * B) * R[2, 0]])
+
+#------------------------------------------------------------------------------
+
+def Rz(psi):
+    """Rotation matrix R(psi) of the 3-DOF horizontal-plane model, eta = [N, E, psi] (= Rzyx(0, 0, psi))."""
+    c, s = np.cos(psi), np.sin(psi)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+#------------------------------------------------------------------------------
+
+def S3(r):
+    """Skew-symmetric matrix of the 3-DOF model, dR(psi)/dt = R(psi) S3(r)."""
+    return np.array([[0.0, -r, 0.0], [r, 0.0, 0.0], [0.0, 0.0, 0.0]])
+
+#------------------------------------------------------------------------------
+
+G_MSS = 9.81      # acceleration of gravity of the MSS ship models (m/s^2)

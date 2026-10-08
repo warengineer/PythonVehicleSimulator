@@ -8,6 +8,7 @@ Author:     Thor I. Fossen
 
 import numpy as np
 import math
+from .gnc import Hmtrx, Smtrx, m2c
 
 def clarke83(U,L,B,T,Cb,R66,xg,T_surge):
     """ 
@@ -150,3 +151,70 @@ def coeffLiftDrag(b, S, CD_0, alpha, sigma=0.0, e=0.3):
     CL = (1 - sigma) * CL_alpha * alpha + sigma * 2 * np.sign(alpha) * np.sin(alpha) ** 2 * np.cos(alpha)
     CD = CD_0 + CL**2 / (np.pi * e * AR)
     return CL, CD
+
+#------------------------------------------------------------------------------
+
+def spheroid(a, b, nu2, r_bG, rho=1025.0):
+    """Rigid-body MRB and CRB(nu2) about the CO of a solid prolate spheroid with semi-axes a > b (MSS spheroid.m):
+    m = 4/3 pi rho a b^2, Ix = 2/5 m b^2, Iy = Iz = 1/5 m (a^2 + b^2); about the CG
+    MRB = diag(m, m, m, Ix, Iy, Iz), CRB = [m S(nu2), 0; 0, -S(Ig nu2)]; moved to the CO with H(r_bG)."""
+    m = 4.0 / 3.0 * np.pi * rho * a * b**2
+    Ix = 2.0 / 5.0 * m * b**2
+    Iy = 1.0 / 5.0 * m * (a**2 + b**2)
+    Ig = np.diag([Ix, Iy, Iy])
+    MRB_CG = np.diag([m, m, m, Ix, Iy, Iy])
+    CRB_CG = np.zeros((6, 6))
+    CRB_CG[0:3, 0:3] = m * Smtrx(nu2)
+    CRB_CG[3:6, 3:6] = -Smtrx(Ig @ np.asarray(nu2, float))
+    H = Hmtrx(r_bG)
+    return H.T @ MRB_CG @ H, H.T @ CRB_CG @ H
+
+#------------------------------------------------------------------------------
+
+def lamb_k(a, b):
+    """Lamb's k-factors of a prolate spheroid (as in MSS imlay61.m): eccentricity e = sqrt(1 - (b/a)^2),
+    k1 (surge), k2 (sway and heave) and k' (roll-free rotation about y and z). Returns (k1, k2, kp, e, alpha0, beta0)."""
+    if a <= b:
+        raise ValueError("a must be larger than b")
+    e = np.sqrt(1 - (b / a) ** 2)
+    lg = np.log((1 + e) / (1 - e))
+    alpha0 = (2 * (1 - e**2) / e**3) * (0.5 * lg - e)
+    beta0 = 1 / e**2 - (1 - e**2) / (2 * e**3) * lg
+    k1 = alpha0 / (2 - alpha0)
+    k2 = beta0 / (2 - beta0)
+    kp = e**4 * (beta0 - alpha0) / ((2 - e**2) * (2 * e**2 - (2 - e**2) * (beta0 - alpha0)))
+    return k1, k2, kp, e, alpha0, beta0
+
+#------------------------------------------------------------------------------
+
+def imlay61(a, b, nu, r44=0.0, rho=1026.0):
+    """Added mass MA = diag(m k1, m k2, m k2, r44 Ix, k' Iy, k' Iy) and CA = m2c(MA, nu) of a prolate spheroid
+    (MSS imlay61.m; Lamb 1932, Imlay 1961). m, Ix, Iy are the values of the displaced fluid."""
+    if a < 0 or b < 0:
+        raise ValueError("a and b must be positive")
+    m = 4.0 / 3.0 * np.pi * rho * a * b**2
+    Ix = 2.0 / 5.0 * m * b**2
+    Iy = 1.0 / 5.0 * m * (a**2 + b**2)
+    k1, k2, kp = lamb_k(a, b)[0:3]
+    MA = np.diag([m * k1, m * k2, m * k2, r44 * Ix, kp * Iy, kp * Iy])
+    return MA, m2c(MA, nu)
+
+#------------------------------------------------------------------------------
+
+def Dmtrx(T_126, zeta_45, MRB, MA, hydrostatics):
+    """Diagonal linear damping matrix (MSS Dmtrx.m). Submerged vehicle: hydrostatics = [W, xg, yg, zg, xb, yb, zb]
+    (W = B assumed, T3 = T2); surface craft: hydrostatics = 6 x 6 restoring matrix G (zeta3 = 0.2)."""
+    M = MRB + MA
+    T1, T2, T6 = T_126
+    zeta4, zeta5 = zeta_45
+    hs = np.asarray(hydrostatics, float)
+    if hs.ndim == 1:
+        W, r_bg, r_bb = hs[0], hs[1:4], hs[4:7]
+        T3 = T2
+        w4 = np.sqrt(W * (r_bg[2] - r_bb[2]) / M[3, 3])
+        w5 = np.sqrt(W * (r_bg[2] - r_bb[2]) / M[4, 4])
+        return np.diag([M[0, 0] / T1, M[1, 1] / T2, M[2, 2] / T3,
+                        M[3, 3] * 2 * zeta4 * w4, M[4, 4] * 2 * zeta5 * w5, M[5, 5] / T6])
+    w3, w4, w5 = (np.sqrt(hs[i, i] / M[i, i]) for i in (2, 3, 4))
+    return np.diag([M[0, 0] / T1, M[1, 1] / T2, M[2, 2] * 2 * 0.2 * w3,
+                    M[3, 3] * 2 * zeta4 * w4, M[4, 4] * 2 * zeta5 * w5, M[5, 5] / T6])

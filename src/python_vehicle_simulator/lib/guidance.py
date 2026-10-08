@@ -12,6 +12,7 @@ Author:     Thor I. Fossen
 
 import numpy as np
 import math
+from .gnc import ssa
 
 # [x_d,v_d,a_d] = refModel3(x_d,v_d,a_d,r,wn_d,zeta_d,v_max,sampleTime) is a 3-order 
 # reference  model for generation of a smooth desired position x_d, velocity |v_d| < v_max, 
@@ -32,4 +33,15 @@ def refModel3(x_d, v_d, a_d, r, wn_d, zeta_d, v_max, sampleTime):
     elif (v_d < -v_max): 
         v_d = -v_max    
     
+    return x_d, v_d, a_d
+
+#------------------------------------------------------------------------------
+
+def refModel(x_d, v_d, a_d, x_ref, v_max, zeta_d, w_d, h, euler_angle=True):
+    """Third-order reference model (MSS refModel.m): desired position, velocity and acceleration at t + h."""
+    e_x = ssa(x_d - x_ref) if euler_angle else x_d - x_ref
+    a_d_dot = -w_d**3 * e_x - (2 * zeta_d + 1) * w_d**2 * v_d - (2 * zeta_d + 1) * w_d * a_d
+    x_d, v_d, a_d = x_d + h * v_d, v_d + h * a_d, a_d + h * a_d_dot
+    if abs(v_d) > v_max:
+        v_d = np.sign(v_d) * v_max
     return x_d, v_d, a_d
