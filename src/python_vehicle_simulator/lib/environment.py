@@ -39,14 +39,13 @@ def _erf(x):
 #------------------------------------------------------------------------------
 
 def HMmsi(a_z, w_e):
-    """O'Hanlon and McCauley (1974) MSI in percent after two hours (MSS HMmsi.m, revision 2025-02-25): a_z is
-    replaced by its rms value over the vector, f_e = w_e/(2 pi) in Hz, mu = -0.819 + 2.32 (log10 f_e)^2,
-    MSI = 50 (1 - erf((-log10(a_z,rms/g) + mu)/(0.4 sqrt(2))))."""
+    """O'Hanlon and McCauley (1974) MSI in percent after two hours (MSS HMmsi.m): a_z is replaced by its rms value
+    over the vector, mu = -0.819 + 2.32 (log10 w_e)^2 with w_e in rad/s (Fossen 2011, eq. 13.149; MSS between
+    2025-02-25 and 2026-10-09 used w_e/(2 pi) in Hz), MSI = 50 (1 - erf((-log10(a_z,rms/g) + mu)/(0.4 sqrt(2))))."""
     a_z = np.atleast_1d(np.asarray(a_z, float)).ravel()
     w_e = np.atleast_1d(np.asarray(w_e, float)).ravel()
     a_rms = np.sqrt(np.mean(a_z**2))
-    f_e = w_e / (2 * np.pi)
-    mu = -0.819 + 2.32 * np.log10(np.maximum(f_e, 1e-6))**2
+    mu = -0.819 + 2.32 * np.log10(np.maximum(w_e, 1e-6))**2
     I = (-np.log10(a_rms / 9.81) + mu) / (0.4 * np.sqrt(2))
     return 100 * (0.5 * (1 - _erf(I)))
 
@@ -79,7 +78,7 @@ def blendermann94(gamma_r, V_r, AFw, ALw, sH, sL, Loa, vessel_no):
     gamma_r: relative wind angle (rad), V_r: relative wind speed (m/s), AFw, ALw: frontal and lateral projected areas
     (m^2), Loa: length overall (m), vessel_no: 1-17. As in the m-file, CK uses sH/H_M with H_M = ALw/Loa and CN uses
     sL/Loa (sH: height of the centroid of ALw above the waterline, sL: its distance from the main section)."""
-    gamma_r = np.atleast_1d(np.asarray(gamma_r, float))
+    gamma_r = np.mod(np.atleast_1d(np.asarray(gamma_r, float)) + np.pi, 2 * np.pi) - np.pi    # [-pi, pi)
     CDt, CDl_bow, CDl_stern, delta, kappa = BLENDERMANN[vessel_no - 1]
     Hm = ALw / Loa
     CDlAF = np.where(np.abs(gamma_r) <= np.pi / 2, CDl_bow, CDl_stern)
@@ -88,7 +87,7 @@ def blendermann94(gamma_r, V_r, AFw, ALw, sH, sL, Loa, vessel_no):
     CX = -CDlAF * np.cos(gamma_r) / den
     CY = CDt * np.sin(gamma_r) / den
     CK = kappa * (sH / Hm) * CY
-    CN = (sL / Loa - 0.18 * (gamma_r - np.pi / 2)) * CY
+    CN = (sL / Loa - 0.18 * (np.abs(gamma_r) - np.pi / 2)) * CY        # symmetric in gamma_r
     q = 0.5 * RHO_AIR * V_r**2
     tau = np.array([q * CX * AFw, q * CY * ALw, q * CN * ALw * Loa])
     return tau, CX, CY, CK, CN
@@ -140,17 +139,17 @@ ISH_DEG = np.arange(0.0, 181.0, 10.0)
 
 def isherwood72(gamma_r, V_r, Loa, B, ALw, AFw, A_SS, S, C, M):
     """Wind forces [X, Y, N] and coefficients CX, CY, CN of Isherwood (1972) (MSS isherwood72.m; note the argument
-    order ALw, AFw). The angle is mapped to 0-180 deg for the table look-up (element by element here) and the side
-    force and yaw moment get the sign of gamma_r, as in the m-file; CY and CN are returned for |gamma_r|."""
-    g_deg = np.mod(np.atleast_1d(np.asarray(gamma_r, float)) / D2R, 360.0)
-    g_deg = np.where(g_deg > 180.0, 360.0 - g_deg, g_deg)
+    order ALw, AFw). gamma_r is wrapped to [-pi, pi): the tables use its magnitude (0-180 deg, element by element)
+    and the side force and yaw moment its sign; CY and CN are returned for |gamma_r|."""
+    gamma_r = np.mod(np.atleast_1d(np.asarray(gamma_r, float)) + np.pi, 2 * np.pi) - np.pi
+    g_deg = np.abs(gamma_r / D2R)
     A, Bc, Cc = (interp1(ISH_DEG, T, g_deg) for T in (ISH_CX, ISH_CY, ISH_CN))
     p = np.array([1.0, 2 * ALw / Loa**2, 2 * AFw / B**2, Loa / B, S / Loa, C / Loa])
     CX = -(A[:, :6] @ p + A[:, 6] * M)
     CY = Bc[:, :6] @ p + Bc[:, 6] * A_SS / ALw
     CN = Cc @ p
     q = 0.5 * RHO_AIR * V_r**2
-    sg = np.sign(np.atleast_1d(gamma_r))
+    sg = np.sign(gamma_r)
     tau = np.array([q * CX * AFw, q * CY * ALw * sg, q * CN * ALw * Loa * sg])
     return tau, CX, CY, CN
 
@@ -315,10 +314,11 @@ def waveDirectionalSpectrum(spectrumType, Parameters, numFreqIntervals, omegaMax
 
 class ForceRAO:
     """1st-order wave forces from force RAOs (MSS waveForceRAO.m) or wave-frequency motions from motion RAOs (MSS
-    waveMotionRAO.m, kind='motion'). The Re and Im parts of the zero-speed RAO tables are interpolated linearly (with
-    extrapolation) first in frequency, at the wave frequencies Omega, and then in direction, at beta_wave - psi + mu
-    wrapped to [0, 2 pi). phases: random phase angles (numFreq x numDirections), the persistent randomPhases of the
-    m-file, which draws them with rng(12345, "twister"); here they are an argument."""
+    waveMotionRAO.m, kind='motion'), with the wave model of MSS waveInitialization.m: the Re and Im parts of the
+    zero-speed RAO tables are interpolated linearly (with extrapolation) in frequency at the wave frequencies Omega;
+    the direction table is closed at 2 pi with the column of 0 deg, and the RAOs are interpolated linearly in direction
+    at beta_wave - psi + mu wrapped to [0, 2 pi). phases: the random phase angles (numFreq x numDirections), the field
+    randomPhases of the waveModel of waveInitialization.m (drawn there with rand); here they are an argument."""
 
     def __init__(self, data, Omega, mu, phases, kind="force"):
         self.w, self.headings, self.g = data["w"], data["headings"], data["main"]["g"]
@@ -328,15 +328,17 @@ class ForceRAO:
         re, im = amp * np.cos(ph), amp * np.sin(ph)                     # 6 x nw x nh
         self.re = np.stack([interp1(self.w, re[i], self.Omega, extrap=True) for i in range(6)])   # 6 x nO x nh
         self.im = np.stack([interp1(self.w, im[i], self.Omega, extrap=True) for i in range(6)])
+        self.raoAngles = np.r_[self.headings, 2 * np.pi]                 # the table closed at 2 pi (0 deg column)
+        self.re = np.concatenate([self.re, self.re[:, :, :1]], axis=2)
+        self.im = np.concatenate([self.im, self.im[:, :, :1]], axis=2)
         self.kind = kind
 
     def rao(self, beta_RAO):
         """Complex RAOs (6 x nO x nDir) at the relative directions beta_RAO (wrapped to [0, 2 pi))."""
         out = np.zeros((6, len(self.Omega), len(beta_RAO)), complex)
         for k, b in enumerate(beta_RAO):
-            out[:, :, k] = (np.stack([interp1(self.headings, self.re[i].T, b, extrap=True)[0] for i in range(6)])
-                            + 1j * np.stack([interp1(self.headings, self.im[i].T, b, extrap=True)[0]
-                                             for i in range(6)]))
+            out[:, :, k] = (np.stack([interp1(self.raoAngles, self.re[i].T, b)[0] for i in range(6)])
+                            + 1j * np.stack([interp1(self.raoAngles, self.im[i].T, b)[0] for i in range(6)]))
         return out
 
     def __call__(self, t, Amp, U, psi, beta_wave):
