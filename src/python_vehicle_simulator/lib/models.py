@@ -257,3 +257,20 @@ def XuuITTC(u_r, rho, L, B, T, C_B=0.65):
     Cf = 0.075 / (np.log10(Re) - 2) ** 2
     S = 1.025 * L * (C_B * B + 1.7 * T)
     return -0.5 * rho * S * (1 + 0.1) * Cf
+
+#------------------------------------------------------------------------------
+
+def clarke83_derivatives(L, B, T, Cb):
+    """Nondimensional (prime-system) linear derivatives of Clarke, Gedling and Hine (1983), as in MSS clarke83.m:
+    acceleration derivatives Yvdot, Yrdot, Nvdot, Nrdot (normalized with 1/2 rho L^3, L^4, L^4, L^5) and velocity
+    derivatives Yv, Yr, Nv, Nr (1/2 rho L^2 U, L^3 U, L^3 U, L^4 U). Y_r and N_r are hydrodynamic derivatives:
+    the rigid-body terms -m U and -m x_g U are not included."""
+    S = np.pi * (T / L)**2
+    return dict(Yvdot=-S * (1 + 0.16 * Cb * B / T - 5.1 * (B / L)**2),
+                Yrdot=-S * (0.67 * B / L - 0.0033 * (B / T)**2),
+                Nvdot=-S * (1.1 * B / L - 0.041 * (B / T)),
+                Nrdot=-S * (1 / 12 + 0.017 * Cb * (B / T) - 0.33 * (B / L)),
+                Yv=-S * (1 + 0.4 * Cb * (B / T)),
+                Yr=-S * (-1 / 2 + 2.2 * (B / L) - 0.08 * (B / T)),
+                Nv=-S * (1 / 2 + 2.4 * (T / L)),
+                Nr=-S * (1 / 4 + 0.039 * (B / T) - 0.56 * (B / L)))

@@ -340,3 +340,7 @@ def levenberg_marquardt(res, jac, p0, valid=lambda p: True, tol=1e-14, max_iter=
             if lam > 1e16:                                   # no further decrease possible: converged
                 break
     return p, np.sqrt(np.mean(e**2))
+
+#------------------------------------------------------------------------------
+
+trapz = getattr(np, "trapezoid", None) or np.trapz        # trapezoidal rule (numpy >= 2.0 / older numpy)

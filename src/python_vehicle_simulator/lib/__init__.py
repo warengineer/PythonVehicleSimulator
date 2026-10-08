@@ -15,3 +15,4 @@ from .environment import *
 from .ins import *
 from .navigation import *
 from .maneuvering import *
+from .hydro import *
