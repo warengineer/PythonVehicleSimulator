@@ -104,8 +104,8 @@ class EKF_5states:
         chi[k+1] = chi[k] + h omega,   omega[k+1] = omega[k] + h(-alpha2 omega + w2);   y1 = x + v1,  y2 = y + v2.
     step(x_meas, y_meas) is called every h seconds; the positions are used every Z-th call (GNSS Z times slower).
     It returns x_hat[k] = [x, y, U, chi, omega], the estimate at the present sample after the correction (equal to
-    the prediction from the previous call when no position arrives), as the code of EKF_5states.m does; the help
-    text of EKF_5states.m calls the output the predicted state x_hat[k+1]. The prediction is kept in self.x_prd."""
+    the prediction from the previous call when no position arrives), as EKF_5states.m does; the prediction
+    x_hat[k+1] is kept in self.x_prd for the next call."""
 
     def __init__(self, h, Z, Qd, Rd, alpha1=0.01, alpha2=0.1, x_prd_init=None, x0=(0.0, 0.0)):
         self.h, self.Z, self.Qd, self.Rd, self.a1, self.a2 = h, Z, np.asarray(Qd, float), np.asarray(Rd, float), \
