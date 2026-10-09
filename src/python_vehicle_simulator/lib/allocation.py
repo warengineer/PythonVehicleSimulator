@@ -167,7 +167,7 @@ def alloc_rpi(T, W, tau, f_max):
 #------------------------------------------------------------------------------
 
 def alloc_qp(T, W, Q, tau, f_min, f_max, f0=None, **kw):
-    """min f'Wf + s'Qs, T f = tau + s, f_min <= f <= f_max (eq. 12.255, beta = 0)"""
+    """min f'Wf + s'Qs, T f = tau + s, f_min <= f <= f_max (Johansen et al. 2005, beta = 0)"""
     T, tau = np.asarray(T, float), np.asarray(tau, float)
     n, r = T.shape
     H = 2.0 * np.block([[np.asarray(W, float), np.zeros((r, n))],
@@ -183,7 +183,7 @@ def alloc_qp(T, W, Q, tau, f_min, f_max, f0=None, **kw):
 #------------------------------------------------------------------------------
 
 def alloc_minmax(T, W, Q, beta, tau, f_min, f_max, tol=1e-6):
-    """min f'Wf + s'Qs + beta fbar  s.t.  T f = tau + s, f_min <= f <= f_max, -fbar <= f_i <= fbar (eq. 12.255).
+    """min f'Wf + s'Qs + beta fbar  s.t.  T f = tau + s, f_min <= f <= f_max, -fbar <= f_i <= fbar (Johansen et al. 2005).
     For a fixed fbar = c the problem is alloc_qp with the bounds tightened to [max(f_min, -c), min(f_max, c)]; its
     optimal value plus beta c is convex in c, so a golden-section search over c finds the optimum.
     Returns f, s, fbar."""
@@ -289,7 +289,7 @@ class OSVAlloc:
              |alpha - alpha_old| <= 0.3 h,  |u - u_old| <= 0.1 h       (rates 0.3 rad/s and 0.1 per second),
     u = |n/n_max| n/n_max, (w1, w2, w3, w4) = (1, 100, 1, 0.1). Here the slack is measured in kN
     (s_unit = 1e3; SIMosv.m measures it in N), which keeps the weights within six orders of magnitude, and the problem
-    is solved as ONE local convex QP per sample (Johansen, Fossen and Berge 2004; Fossen 2011, eq. 12.263): the
+    is solved as ONE local convex QP per sample (Johansen, Fossen and Berge 2004): the
     constraint is linearized at the previous solution, T(alpha) K u ~ T(alpha_old) K u
     + d(T(alpha) K u_old)/dalpha (alpha - alpha_old), which is linear in (alpha, u). qp_box_eq solves it in
     x = [alpha, u, z], z = sqrt(w2) s/s_unit (the slack scaled to kN and by the square root of its weight).

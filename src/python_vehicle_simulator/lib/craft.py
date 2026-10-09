@@ -725,8 +725,8 @@ class OSVModel:
     """xdot = osv(x, ui, Vc, betaVc) of MSS (osv.m, version of the MSS master branch on 7 October 2026), 6 DOF,
     x = [u v w p q r  x y z  phi theta psi], ui = [n1, n2, n3, n4, alpha1, alpha2] (shaft speeds, azimuth angles in rad).
     eta_dot = J(eta) nu, nu_dot = nu_c_dot + M^-1 (tau_thr + tau_crossflow - (CRB + CA + D) nu_r - G eta) with
-    CA = m2c(MA, nu) and D11 = exp(-3|u_r|) D11_lin - Xuu |u_r| (XuuITTC) in every call (osv.m before
-    2026-10-07 set the linear surge damping to zero after its first call)."""
+    CA = m2c(MA, nu) and D11 = exp(-3|u_r|) D11_lin - Xuu |u_r| (XuuITTC) in every call, as osv.m keeps the
+    linear surge damping."""
 
     def __call__(self, x, ui, Vc=0.0, betaVc=0.0):
         v = OSV
@@ -754,7 +754,7 @@ class OSVModel:
 
 #------------------------------------------------------------------------------
 
-osv = OSVModel()                        # the state of osv.m inside the loop of SIMosv.m (D11_lin already zeroed)
+osv = OSVModel()                        # osv.m as called in the loop of SIMosv.m
 
 #------------------------------------------------------------------------------
 
