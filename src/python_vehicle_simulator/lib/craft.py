@@ -544,7 +544,7 @@ def _otter_constants(mp, rp):
     I_T = (2 * (1 / 12) * L * B_pont**3 * (6 * Cw_pont**3 / ((1 + Cw_pont) * (1 + 2 * Cw_pont)))
            + 2 * Aw_pont * y_pont**2)
     I_L = 0.8 * 2 * (1 / 12) * B_pont * L**3
-    KB = (1 / 3) * (5 * T / 2 - 0.5 * nabla / Aw_pont)           # otter.m revision 2026-10-07
+    KB = (1 / 3) * (5 * T / 2 - 0.5 * nabla / Aw_pont)           # as in MSS otter.m
     KG = T - rg_total[2]
     GM_T, GM_L = KB + I_T / nabla - KG, KB + I_L / nabla - KG
     G_CF = np.diag([0.0, 0.0, rho * g * 2 * Aw_pont, rho * g * nabla * GM_T, rho * g * nabla * GM_L, 0.0])

@@ -167,7 +167,7 @@ def m2c(M, nu):
         C[3:6,0:3] = -Smtrx(dt_dnu1)
         C[3:6,3:6] = -Smtrx(dt_dnu2)
             
-    else:   # 3-DOF model (surge, sway and yaw), full momenta p = M nu as in MSS m2c.m (2026-10-07)
+    else:   # 3-DOF model (surge, sway and yaw), full momenta p = M nu as in MSS m2c.m
         #C = [ 0     0    -p(2)
         #      0     0     p(1)
         #      p(2) -p(1)  0    ]
