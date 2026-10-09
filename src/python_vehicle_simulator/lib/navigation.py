@@ -37,7 +37,7 @@ def lowPassFilter(xf, u, w_n, h):
 
 def highPassFilter(xf, u, w_n, h):
     """First-order high-pass filter s/(s + w_n), exact discretization (MSS highPassFilter.m); y[k] = u[k] - xf[k].
-    w_n is a scalar or a vector (the m-file also accepts a diagonal matrix; this port does not)."""
+    w_n is a scalar or a vector (the m-file also accepts a diagonal matrix; this function does not)."""
     phi = np.exp(-h * np.asarray(w_n, float))
     y = u - xf
     return phi * xf + (1 - phi) * u, y

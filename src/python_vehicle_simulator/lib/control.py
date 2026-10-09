@@ -181,7 +181,7 @@ class IntegralSMCheading:
 #------------------------------------------------------------------------------
 
 class PIDnonlinearMIMO:
-    """Nonlinear MIMO PID for DP (MSS PIDnonlinearMIMO.m, Algorithm 15.2 of Fossen 2027):
+    """Nonlinear MIMO PID for DP (MSS PIDnonlinearMIMO.m):
     tau = -R(psi)' (Kp e + Ki z_int) - Kd nu, e = eta - eta_d (ssa in yaw), Kp = M_diag wn^2, Kd = 2 M_diag zeta wn
     (no -D term), Ki = Kp wn/10; z_int and the setpoint filter eta_d (time constant T_f) are updated by Euler after
     tau. The persistent variables of the m-file are attributes: create a new object instead of

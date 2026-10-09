@@ -473,7 +473,7 @@ def tanker(x, ui):
 def DSRV(x, u):
     """Pitch-depth model of the deep submergence rescue vehicle, x = [w, q, x, z, theta], u = delta_s (rad)
     (MSS DSRV.m, data of Healey 1992). The hydrodynamic data are the non-dimensional values of the reference;
-    DSRV.m uses them directly in the state equations, and so does this port. Returns (xdot, U)."""
+    DSRV.m uses them directly in the state equations, and so does this function. Returns (xdot, U)."""
     x = np.asarray(x, float)
     U0, W0 = 4.11, 0.0
     U = np.sqrt(U0**2 + (W0 + x[0]) ** 2)

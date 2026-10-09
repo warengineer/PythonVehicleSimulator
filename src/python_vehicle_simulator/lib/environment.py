@@ -40,8 +40,8 @@ def _erf(x):
 
 def HMmsi(a_z, w_e):
     """O'Hanlon and McCauley (1974) MSI in percent after two hours (MSS HMmsi.m): a_z is replaced by its rms value
-    over the vector, mu = -0.819 + 2.32 (log10 w_e)^2 with w_e in rad/s (Fossen 2011, eq. 13.149; MSS between
-    2025-02-25 and 2026-10-09 used w_e/(2 pi) in Hz), MSI = 50 (1 - erf((-log10(a_z,rms/g) + mu)/(0.4 sqrt(2))))."""
+    over the vector, mu = -0.819 + 2.32 (log10 w_e)^2 with w_e in rad/s,
+    MSI = 50 (1 - erf((-log10(a_z,rms/g) + mu)/(0.4 sqrt(2))))."""
     a_z = np.atleast_1d(np.asarray(a_z, float)).ravel()
     w_e = np.atleast_1d(np.asarray(w_e, float)).ravel()
     a_rms = np.sqrt(np.mean(a_z**2))
