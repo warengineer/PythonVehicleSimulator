@@ -409,7 +409,7 @@ def quatprod(q1, q2):
 #------------------------------------------------------------------------------
 
 def euler2q(phi, theta, psi):
-    """Unit quaternion from Euler angles (MSS euler2q.m; like the m-file it divides by q'q, which is 1)."""
+    """Unit quaternion from Euler angles (MSS euler2q.m); the result is divided by its norm."""
     cy, sy = math.cos(psi * 0.5), math.sin(psi * 0.5)
     cp, sp = math.cos(theta * 0.5), math.sin(theta * 0.5)
     cr, sr = math.cos(phi * 0.5), math.sin(phi * 0.5)
