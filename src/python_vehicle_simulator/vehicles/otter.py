@@ -171,7 +171,7 @@ class otter:
             + 2 * Aw_pont * y_pont ** 2
         )
         I_L = 0.8 * 2 * (1 / 12) * self.B_pont * self.L ** 3
-        KB = (1 / 3) * (5 * self.T / 2 - 0.5 * nabla / (self.L * self.B_pont))
+        KB = (1 / 3) * (5 * self.T / 2 - 0.5 * nabla / Aw_pont)
         BM_T = I_T / nabla  # BM values
         BM_L = I_L / nabla
         KM_T = KB + BM_T    # KM values
