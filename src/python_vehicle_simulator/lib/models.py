@@ -130,8 +130,8 @@ KAPPA_SUP = np.array([[2, 0.80], [5, 0.80], [10, 0.82], [20, 0.90], [40, 0.98], 
 def cylinderDrag(L, B, nu_r, re_length=None):
     """2-D drag coefficient of a cylinder in cross-flow, Cd(Re) times the aspect-ratio factor kappa(L/B)
     (MSS cylinderDrag.m, DNV-RP-C205): Re = U_cf B 1e6 with the diameter B and the cross-flow speed
-    U_cf = sqrt(v_r^2 + w_r^2). re_length (not in MSS) replaces B in the Reynolds number; the MSS version before
-    2026-10-05 used the length L. np.interp holds the end values, as the MSS code does."""
+    U_cf = sqrt(v_r^2 + w_r^2). re_length (not in MSS) replaces B in the Reynolds number, e.g. by the length L
+    for a comparison. np.interp holds the end values, as the MSS code does."""
     U_cf = np.sqrt(nu_r[1] ** 2 + nu_r[2] ** 2)
     Re = U_cf * (B if re_length is None else re_length) * 1e6
     Cd = float(np.interp(Re, CYL_CD[:, 0], CYL_CD[:, 1]))
