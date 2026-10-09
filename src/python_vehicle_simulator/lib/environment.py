@@ -51,7 +51,7 @@ def HMmsi(a_z, w_e):
 
 #------------------------------------------------------------------------------
 
-RHO_AIR = 1.224                     # blendermann94.m and isherwood72.m (comment "Density of air at 20 C")
+RHO_AIR = 1.224                     # blendermann94.m and isherwood72.m (comment "Density of air at 15 C")
 
 #------------------------------------------------------------------------------
 
