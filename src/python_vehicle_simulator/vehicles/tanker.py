@@ -298,8 +298,11 @@ class tanker:
         delta_c = headingAutopilot(eta,nu,sampleTime) is a PID controller
         for automatic heading control based on pole placement.
 
-        tau_N = m * a_d + d * r_d
-              - Kp * ( ssa( psi-psi_d ) + Td * (r - r_d) + (1/Ti) * e_int )
+        tau_N = - Kp * ( (psi - psi_d) + Td * (r - r_d) + (1/Ti) * e_int )
+
+        Feedback only: PIDpolePlacement adds no reference feedforward
+        m * a_d + d * r_d. psi and psi_d are both continuous (never wrapped),
+        so the heading error psi - psi_d is not wrapped with ssa.
         """
         psi = eta[5]                        # yaw angle
         r = nu[5]                           # yaw rate

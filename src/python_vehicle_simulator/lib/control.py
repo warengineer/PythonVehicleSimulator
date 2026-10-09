@@ -35,6 +35,18 @@ def PIDpolePlacement(
     v_max,
     sampleTime,
 ):
+    """
+    [u, e_int, x_d, v_d, a_d] = PIDpolePlacement(e_int, e_x, e_v, x_d, v_d,
+    a_d, m, d, k, wn_d, zeta_d, wn, zeta, r, v_max, sampleTime) is a SISO PID
+    feedback controller for m * a + d * v + k * x = u, with gains from pole
+    placement and a 3rd-order reference model for x_d, v_d and a_d:
+
+        u = - Kp * e_x - Kd * e_v - Ki * e_int
+        Kp = m * wn^2 - k,  Kd = m * 2 * zeta * wn - d,  Ki = (wn/10) * Kp
+
+    There is no reference feedforward m * a_d + d * v_d + k * x_d, and the
+    error e_x is used as given (not wrapped).
+    """
 
     # PID gains based on pole placement
     Kp = m * wn ** 2.0 - k

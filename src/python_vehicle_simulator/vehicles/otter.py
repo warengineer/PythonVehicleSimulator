@@ -337,8 +337,11 @@ class otter:
         u = headingAutopilot(eta,nu,sampleTime) is a PID controller
         for automatic heading control based on pole placement.
 
-        tau_N = (T/K) * a_d + (1/K) * rd
-               - Kp * ( ssa( psi-psi_d ) + Td * (r - r_d) + (1/Ti) * z )
+        tau_N = - Kp * ( (psi - psi_d) + Td * (r - r_d) + (1/Ti) * z )
+
+        Feedback only: PIDpolePlacement adds no reference feedforward
+        (T/K) * a_d + (1/K) * r_d. psi and psi_d are both continuous (never wrapped),
+        so the heading error psi - psi_d is not wrapped with ssa.
 
         """
         psi = eta[5]  # yaw angle
