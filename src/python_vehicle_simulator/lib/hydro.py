@@ -16,7 +16,7 @@ from .numerics import pchip, trapz
 
 #------------------------------------------------------------------------------
 
-T6 = np.array([1, -1, -1, 1, -1, -1.0])                    # WAMIT axes (x fwd, y port, z up) -> Fossen axes
+T6 = np.array([1, -1, -1, 1, -1, -1.0])                    # WAMIT axes (x fwd, y port, z up) -> MSS axes (y stbd, z down)
 MIRROR = np.array([1, -1, 1, -1, 1, -1.0])                 # MSS counts the wave angle the other way round
 
 #------------------------------------------------------------------------------
@@ -31,7 +31,7 @@ def read_wamit(prefix, Lpp=246.0, Boa=46.0, T=10.0):
     particulars (Lpp, Boa, T, rho, g, m, nabla, CG r_g, CB r_b) and
     MRB, C, Bext (6 x 6); freqs (w = 0, the WAMIT frequencies, w = inf); A, B (6, 6, len(freqs));
     w_rao, headings [deg]; forceRAO [N/m, N m/m] and motionRAO [m/m, rad/m], complex, shape (6, len(w_rao), 19).
-    All about the CO (Lpp/2, centre line, waterline) in Fossen axes (x fwd, y stbd, z down). prefix is the path of
+    All about the CO (Lpp/2, centre line, waterline) in the MSS axes (x fwd, y stbd, z down). prefix is the path of
     the files without the extension, e.g. <MSS>/HYDRO/vessels_wamit/tanker/tanker; Lpp, Boa, T are the main
     dimensions (wamit2vessel.m takes them as inputs; the defaults are those of the MSS tanker)."""
     out = open(prefix + ".out").read()
@@ -100,7 +100,7 @@ def read_wamit(prefix, Lpp=246.0, Boa=46.0, T=10.0):
 #------------------------------------------------------------------------------
 
 def pm_weight(w, wp, b=0.74):
-    """Normalized PM weighting of the notes and MSS: S ~ w^-5 exp(-b (wp/w)^4), unit area."""
+    """Normalized PM weighting of MSS computeManeuveringModel.m: S ~ w^-5 exp(-b (wp/w)^4), unit area."""
     S = w**-5.0 * np.exp(-b * (wp / w)**4)
     return S / trapz(S, w)
 
@@ -108,7 +108,7 @@ def pm_weight(w, wp, b=0.74):
 
 def power_based(v, wp, kappa_126=(0.05, 0.05, 0.05), dzeta_345=(0.0, 0.1, 0.0), n=100, b=0.74):
     """MSS computeManeuveringModel: power-based A_eq, B_eq; Bv = kappa B_eq (DOF 1, 2, 6), 2 dzeta sqrt(M G)
-    (DOF 3, 4, 5); D = B_eq + Bv; T_126 = M_ii / D_ii (Lecture 5, Section 5.6)."""
+    (DOF 3, 4, 5); D = B_eq + Bv; T_126 = M_ii / D_ii (as MSS computeManeuveringModel.m)."""
     fin = np.isfinite(v["freqs"])
     w = v["freqs"][fin]
     wf = np.linspace(max(w.min(), 1e-6), w.max(), n)
