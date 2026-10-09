@@ -319,11 +319,17 @@ class otter:
         tau = np.array([tau_X, tau_N])  # tau = B * u_alloc
         u_alloc = np.matmul(self.Binv, tau)  # u_alloc = inv(B) * tau
 
-        # u_alloc = abs(n) * n --> n = sign(u_alloc) * sqrt(u_alloc)
-        n1 = np.sign(u_alloc[0]) * math.sqrt(abs(u_alloc[0]))
-        n2 = np.sign(u_alloc[1]) * math.sqrt(abs(u_alloc[1]))
+        # B = k_pos * B_thrust: the thrust of propeller i is k_pos * u_alloc[i].
+        # Forward (thrust >= 0): n = sqrt(u_alloc); astern the thrust is
+        # k_neg * n * abs(n), so n = -sqrt(-u_alloc * k_pos / k_neg)
+        n = np.zeros(2)
+        for i in range(0, 2):
+            if u_alloc[i] >= 0:
+                n[i] = math.sqrt(u_alloc[i])
+            else:
+                n[i] = -math.sqrt(-u_alloc[i] * self.k_pos / self.k_neg)
 
-        return n1, n2
+        return n[0], n[1]
 
 
     def headingAutopilot(self, eta, nu, sampleTime):
