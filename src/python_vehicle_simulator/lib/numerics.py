@@ -212,7 +212,7 @@ def expm_taylor(A):
     k = 1
     while np.linalg.norm(term, np.inf) > 1e-6:
         Ak = Ak @ A
-        term = Ak / math.factorial(k)
+        term = Ak / (float(math.factorial(k)) if k <= 170 else math.inf)  # MATLAB: factorial(171) = Inf
         E = E + term
         k += 1
     return E
