@@ -1,3 +1,8 @@
+> **Branch `course-v1.0`:** the version of the Python Vehicle Simulator used by the course *Marine Craft
+> Hydrodynamics and Motion Control* (Prof. Dr. Serhat YILMAZ, Volkan AKILLI). It is upstream commit a93d1938ba with
+> the MSS functions of the course added to `python_vehicle_simulator.lib` and a few corrections;
+> [COURSE_CHANGES.md](COURSE_CHANGES.md) lists them, together with observations that are not changed.
+
 # Python Vehicle Simulator
 
 The Python Vehicle Simulator supplements the MATLAB MSS (Marine Systems Simulator) Toolbox. It includes models for autonomous underwater vehicles (AUVs), unmanned surface vehicles (USVs), and ships. The vehicle models are based on the MSS vessel models in /MSS/VESSELS/catalog. Each vehicle is modeled as an object in Python, and the vehicle class has methods for guidance, navigation, and control. The main program ```main.py``` defines vehicle objects for real-time simulation. 
